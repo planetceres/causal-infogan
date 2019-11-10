@@ -1,4 +1,5 @@
 data/
 out/
 __pycache__/
+.idea/
 
