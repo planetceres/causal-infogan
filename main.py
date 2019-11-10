@@ -15,15 +15,18 @@ parser.add_argument("-prefix",
                     help="experiment prefix")
 parser.add_argument("-fcnpath",
                     type=str,
-                    default='/home/wilson/causal-infogan/data/FCN_mse',
+                    default='',
+                    #default='/home/wilson/causal-infogan/data/FCN_mse',
                     help="path to fcn parameters for background subtraction")
 parser.add_argument("-data_dir",
                     type=str,
-                    default='/home/wilson/causal-infogan/data/rope_full',
+                    default='/home/wilson/causal-infogan/data/rope/full_data',
+                    #default='/home/wilson/causal-infogan/data/rope_full',
                     help='path to rope_full data')
 parser.add_argument("-planning_data_dir",
                     type=str,
-                    default='/home/wilson/causal-infogan/data/seq_data_2',
+                    default='/home/wilson/causal-infogan/data/rope/seq_data',
+                    #default='/home/wilson/causal-infogan/data/seq_data_2',
                     help='path to seq_data_2 data')
 parser.add_argument("-loadpath",
                     type=str,

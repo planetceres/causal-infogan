@@ -284,7 +284,7 @@ class Classifier(nn.Module):
         super(Classifier, self).__init__()
         self.LeNet = nn.Sequential(
             # input size 2 x 64 x 64. Take 2 black and white images.
-            nn.Conv2d(2, 64, 4, 2, 1),
+            nn.Conv2d(6, 64, 4, 2, 1),
             nn.LeakyReLU(0.1, inplace=True),
             # 64 x 32 x 32
             nn.Conv2d(64, 128, 4, 2, 1, bias=False),

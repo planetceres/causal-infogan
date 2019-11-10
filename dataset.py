@@ -65,7 +65,8 @@ def make_dataset(dir, class_to_idx):
                 if fname == 'actions.npy':
                     path = os.path.join(root, fname)
                     actions.append(np.load(path))
-                    actions[-1][-1, 4] = 0.0
+                    actions[-1][:, -1] = 1.0
+                    actions[-1][-1, -1] = 0.0
 
     return images, np.concatenate(actions, axis=0)
 
@@ -81,7 +82,7 @@ def make_pair(imgs, resets, k, get_img, root):
     if k < 0:
         return list(zip(imgs, np.random.permutation(imgs)))
 
-    filename = 'imgs_skipped_%d.pkl' % k
+    filename = 'rope_pairs_%d.pkl' % k
     if os.path.exists(filename):
         with open(filename, 'rb') as f:
             return pkl.load(f)
