@@ -5,6 +5,7 @@ import os
 import os.path
 import gzip
 import errno
+from tqdm import tqdm
 
 from torchvision.datasets.folder import is_image_file, default_loader, find_classes, \
     IMG_EXTENSIONS
@@ -88,13 +89,42 @@ def make_pair(imgs, resets, k, get_img, root):
             return pkl.load(f)
 
     image_pairs = []
-    for i, img in enumerate(imgs):
+    for i, img in tqdm(enumerate(imgs)):
         if np.sum(resets[i:i + k]) == 0 and (get_img(imgs[i + k][0]) - get_img(img[0])).abs().max() > 0.5:
             image_pairs.append((img, imgs[i + k]))
     with open(filename, 'wb') as f:
         pkl.dump(image_pairs, f)
     return image_pairs
 
+
+def make_negative_pairs(imgs, resets):
+    """
+    Return a list of negative image pairs. For each pair, the second image is picked
+    from a different episode
+    """
+    filename = 'rope_neg_pairs.pkl'
+    if os.path.exists(filename):
+        with open(filename, 'rb') as f:
+            return pkl.load(f)
+
+    idxs = np.argwhere(resets).reshape(-1)
+    idxs = np.concatenate(([-1], idxs), axis=0)
+    episodes = []
+    for i in range(len(idxs) - 1):
+        episodes.append((idxs[i] + 1, idxs[i + 1] + 1)) # (inclusive, exclusive)
+
+    neg_image_pairs = []
+    for i, img in tqdm(enumerate(imgs)):
+        ep_idx = np.random.randint(0, len(episodes))
+        while episodes[ep_idx][0] <= i < episodes[ep_idx][1]:
+            ep_idx = np.random.randint(0, len(episodes))
+
+        next_img = np.random.randint(episodes[ep_idx][0], episodes[ep_idx][1])
+        neg_image_pairs.append((img, imgs[next_img]))
+
+    with open(filename, 'wb') as f:
+        pkl.dump(neg_image_pairs, f)
+    return neg_image_pairs
 
 class ImagePairs(data.Dataset):
     """
@@ -118,7 +148,7 @@ class ImagePairs(data.Dataset):
     url = 'https://drive.google.com/uc?export=download&confirm=ypZ7&id=10xovkLQ09BDvhtpD_nqXWFX-rlNzMVl9'
 
     def __init__(self, root, transform=None, target_transform=None,
-                 loader=default_loader, n_frames_apart=1, download=False):
+                 loader=default_loader, n_frames_apart=1, download=False, include_neg=False):
         self.root = root
         if download:
             self.download()
@@ -139,6 +169,11 @@ class ImagePairs(data.Dataset):
         self.loader = loader
         img_pairs = make_pair(imgs, resets, n_frames_apart, self._get_image, self.root)
         self.img_pairs = img_pairs
+
+        if include_neg:
+            neg_img_pairs = make_negative_pairs(imgs, resets)
+            self.img_pairs += neg_img_pairs
+
 
     def _get_image(self, path):
         img = self.loader(path)

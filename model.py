@@ -277,13 +277,13 @@ class Flatten(nn.Module):
 
 class Classifier(nn.Module):
     """
-    Classifier is trained to predict the score between two black/white rope images.
+    Classifier is trained to predict the score between two color rope images.
     The score is high if they are within a few steps apart, and low other wise.
     """
     def __init__(self):
         super(Classifier, self).__init__()
         self.LeNet = nn.Sequential(
-            # input size 2 x 64 x 64. Take 2 black and white images.
+            # input size 6 x 64 x 64. Take 2 color images.
             nn.Conv2d(6, 64, 4, 2, 1),
             nn.LeakyReLU(0.1, inplace=True),
             # 64 x 32 x 32
@@ -325,8 +325,6 @@ def get_causal_classifier(path, default):
     """
     if not os.path.exists(path):
         return default
-    with open(path, 'rb') as f:
-        weights = dill.load(f)
     classifier = Classifier().cuda()
-    classifier.load_state_dict({k: torch.FloatTensor(v) for k, v in weights[0].items()})
+    classifier.load_state_dict(torch.load(path))
     return classifier
