@@ -83,7 +83,7 @@ def make_pair(imgs, resets, k, get_img, root):
     if k < 0:
         return list(zip(imgs, np.random.permutation(imgs)))
 
-    filename = 'rope_pairs_%d.pkl' % k
+    filename = os.path.join(root, 'rope_pairs_%d.pkl' % k)
     if os.path.exists(filename):
         with open(filename, 'rb') as f:
             return pkl.load(f)
@@ -91,18 +91,20 @@ def make_pair(imgs, resets, k, get_img, root):
     image_pairs = []
     for i, img in tqdm(enumerate(imgs)):
         if np.sum(resets[i:i + k]) == 0 and (get_img(imgs[i + k][0]) - get_img(img[0])).abs().max() > 0.5:
-            image_pairs.append((img, imgs[i + k]))
+            next_img = imgs[i + k]
+            image_pairs.append(((img[0], np.array(1.0, dtype='float32')),
+                                (next_img[0], np.array(1.0, dtype='float32'))))
     with open(filename, 'wb') as f:
         pkl.dump(image_pairs, f)
     return image_pairs
 
 
-def make_negative_pairs(imgs, resets):
+def make_negative_pairs(imgs, resets, root):
     """
     Return a list of negative image pairs. For each pair, the second image is picked
     from a different episode
     """
-    filename = 'rope_neg_pairs.pkl'
+    filename = os.path.join(root, 'rope_neg_pairs.pkl')
     if os.path.exists(filename):
         with open(filename, 'rb') as f:
             return pkl.load(f)
@@ -120,7 +122,9 @@ def make_negative_pairs(imgs, resets):
             ep_idx = np.random.randint(0, len(episodes))
 
         next_img = np.random.randint(episodes[ep_idx][0], episodes[ep_idx][1])
-        neg_image_pairs.append((img, imgs[next_img]))
+        next_img = imgs[next_img]
+        neg_image_pairs.append(((img[0], np.array(0.0, dtype='float32')),
+                                (next_img[0], np.array(0.0, dtype='float32'))))
 
     with open(filename, 'wb') as f:
         pkl.dump(neg_image_pairs, f)
@@ -171,7 +175,7 @@ class ImagePairs(data.Dataset):
         self.img_pairs = img_pairs
 
         if include_neg:
-            neg_img_pairs = make_negative_pairs(imgs, resets)
+            neg_img_pairs = make_negative_pairs(imgs, resets, root)
             self.img_pairs += neg_img_pairs
 
 
