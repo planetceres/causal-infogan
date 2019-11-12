@@ -333,19 +333,19 @@ def get_causal_classifier(path, default):
 
 class WGAN(nn.Module):
 
-    def __init__(self, z_dim, channel_dim, lambda_=10):
+    def __init__(self, z_dim, channel_dim, c_dim=0, lambda_=10):
         super().__init__()
         self.lambda_ = lambda_
-        self.G = SingleG(z_dim, channel_dim)
+        self.G = SingleG(z_dim, channel_dim, c_dim=c_dim)
         self.D = SingleD(channel_dim)
 
-    def sample(self, n):
-        samples = self.generate(n)
+    def sample(self, n, cond=None):
+        samples = self.generate(n, cond=cond)
         samples = samples * 0.5 + 0.5
         return samples.cpu()
 
-    def generate(self, n):
-        return self.G.sample(n)
+    def generate(self, n, cond=None):
+        return self.G.sample(n, cond=cond)
 
     def discriminate(self, x):
         return self.D(x)
@@ -401,9 +401,9 @@ class SingleD(nn.Module):
 
 
 class SingleG(nn.Module):
-    def __init__(self, z_dim, channel_dim):
+    def __init__(self, z_dim, channel_dim, c_dim=0):
         super(SingleG, self).__init__()
-        self.latent_dim = z_dim
+        self.latent_dim = z_dim + c_dim
         self.model = nn.Sequential(
             nn.ConvTranspose2d(self.latent_dim, 512, 4, 1, bias=False),
             nn.BatchNorm2d(512),
@@ -424,7 +424,10 @@ class SingleG(nn.Module):
     def forward(self, z):
         return self.model(z)
 
-    def sample(self, n):
-        z = torch.randn(n, self.latent_dim, 1, 1).cuda()
+    def sample(self, n, cond=None):
+        z = torch.randn(n, self.latent_dim).cuda()
+        if cond is not None:
+            z = torch.cat((z, cond), dim=-1)
+        z = z.unsqueeze(-1).unsqueeze(-1)
         out = self(z)
         return out
