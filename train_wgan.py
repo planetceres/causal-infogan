@@ -11,7 +11,7 @@ from torchvision.utils import save_image
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
 
-from model import WGAN
+from model import WGAN, FCN_mse
 
 def inf_iterator(data_loader):
     epoch = 0
@@ -20,7 +20,7 @@ def inf_iterator(data_loader):
             yield batch
         epoch += 1
 
-def train(model, data_loader):
+def train(model, fcn, data_loader):
     itrs = args.itrs
     log_interval = args.log_interval
     n_critic = 5
@@ -29,7 +29,7 @@ def train(model, data_loader):
     optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
 
     data_gen = inf_iterator(data_loader)
-    filepath = join('out', 'wgan')
+    filepath = join('out', 'out_rope_wgan')
     if not exists(filepath):
         os.makedirs(filepath)
 
@@ -39,6 +39,7 @@ def train(model, data_loader):
         for _ in range(n_critic):
             x,  _ = next(data_gen)
             x  = x.cuda()
+            x = apply_fcn_mse(fcn, x)
             batch_size = x.size(0)
 
             optimizerD.zero_grad()
@@ -64,10 +65,17 @@ def train(model, data_loader):
         pbar.update(1)
     pbar.close()
 
+def apply_fcn_mse(fcn, img):
+    o = fcn(img).detach()
+    return torch.clamp(2 * (o - 0.5), -1 + 1e-3, 1 - 1e-3)
 
 def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
+
+    fcn = FCN_mse(2).cuda()
+    fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
+    fcn.eval()
 
     def filter_background(x):
         x[:, (x < 0.3).any(dim=0)] = 0.0
@@ -77,16 +85,16 @@ def main():
         transforms.Resize(64),
         transforms.CenterCrop(64),
         transforms.ToTensor(),
-        filter_background,
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        lambda x: x.mean(dim=0)[None, :, :],
+        #filter_background,
+        #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        #lambda x: x.mean(dim=0)[None, :, :],
     ])
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(10, 1, lambda_=10).cuda()
-    train(model, loader)
+    model = WGAN(32, 1, lambda_=10).cuda()
+    train(model, fcn, loader)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -94,7 +102,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
     parser.add_argument('--itrs', type=int, default=int(1e5))
-    parser.add_argument('--log_interval', type=int, default=1000)
+    parser.add_argument('--log_interval', type=int, default=500)
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
     main()

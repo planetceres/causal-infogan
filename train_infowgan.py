@@ -95,7 +95,7 @@ def main():
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(10, 1, c_dim=args.c_dim, lambda_=10).cuda()
+    model = WGAN(args.z_dim, 1, c_dim=args.c_dim, lambda_=10).cuda()
     posterior = GaussianPosterior(args.c_dim, 1, 1).cuda()
     prior = UniformDistribution(s_dim=args.c_dim)
     train(model, posterior, prior, loader)

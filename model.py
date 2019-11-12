@@ -404,6 +404,7 @@ class SingleG(nn.Module):
     def __init__(self, z_dim, channel_dim, c_dim=0):
         super(SingleG, self).__init__()
         self.latent_dim = z_dim + c_dim
+        self.z_dim = z_dim
         self.model = nn.Sequential(
             nn.ConvTranspose2d(self.latent_dim, 512, 4, 1, bias=False),
             nn.BatchNorm2d(512),
@@ -425,7 +426,7 @@ class SingleG(nn.Module):
         return self.model(z)
 
     def sample(self, n, cond=None):
-        z = torch.randn(n, self.latent_dim).cuda()
+        z = torch.randn(n, self.z_dim).cuda()
         if cond is not None:
             z = torch.cat((z, cond), dim=-1)
         z = z.unsqueeze(-1).unsqueeze(-1)
