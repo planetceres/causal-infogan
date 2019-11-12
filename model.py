@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.autograd as autograd
 from utils import from_numpy_to_var
 
 
@@ -328,3 +329,102 @@ def get_causal_classifier(path, default):
     classifier = Classifier().cuda()
     classifier.load_state_dict(torch.load(path))
     return classifier
+
+
+class WGAN(nn.Module):
+
+    def __init__(self, z_dim, channel_dim, lambda_=10):
+        super().__init__()
+        self.lambda_ = lambda_
+        self.G = SingleG(z_dim, channel_dim)
+        self.D = SingleD(channel_dim)
+
+    def sample(self, n):
+        samples = self.generate(n)
+        samples = samples * 0.5 + 0.5
+        return samples.cpu()
+
+    def generate(self, n):
+        return self.gen.sample(n)
+
+    def discriminate(self, x):
+        return self.disc(x)
+
+    def sample_eps(self, n):
+        return torch.rand(n).cuda()
+
+    def grad_penalty(self, x_hat):
+        Dx_hat = self.discriminate(x_hat)
+        grads = autograd.grad(Dx_hat, x_hat, torch.ones_like(Dx_hat),
+                              retain_graph=True, create_graph=True, only_inputs=True)[0]
+        grads = grads.view(grads.size(0), -1)
+        grad_norms = torch.sqrt((grads ** 2).sum(-1))
+        grad_penalty = self.lambda_ * (grad_norms - 1) ** 2
+        return grad_penalty.mean()
+
+    def gan_loss(self, x_tilde, x):
+        Dx_tilde = self.discriminate(x_tilde)
+        Dx = self.discriminate(x)
+        return (Dx_tilde - Dx).mean()
+
+    def generator_loss(self, gz):
+        D_gz = self.discriminate(gz)
+        return -D_gz.mean()
+
+
+class SingleD(nn.Module):
+    def __init__(self, channel_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            # input size (2 or 6) x 64 x64
+            nn.Conv2d(2 * channel_dim, 64, 4, 2, 1),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 64 x 32 x 32
+            nn.Conv2d(64, 128, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 128 x 16 x 16
+            nn.Conv2d(128, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            # Option 1: 256 x 8 x 8
+            nn.Conv2d(256, 512, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 512 x 4 x 4
+            nn.Conv2d(512, 1, 4),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class SingleG(nn.Module):
+    def __init__(self, z_dim, channel_dim):
+        super(SingleG, self).__init__()
+        self.latent_dim = z_dim
+        self.model = nn.Sequential(
+            nn.ConvTranspose2d(self.latent_dim, 512, 4, 1, bias=False),
+            nn.BatchNorm2d(512),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(64, 2 * channel_dim, 4, 2, 1, bias=False),
+            nn.Tanh(),
+        )
+
+    def forward(self, z):
+        return self.model(z)
+
+    def sample(self, n):
+        z = torch.randn(n, self.noise_dim).cuda()
+        out = self(z)
+        return out

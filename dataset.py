@@ -137,6 +137,7 @@ def make_negative_pairs(imgs, resets, root):
         pkl.dump(neg_image_pairs, f)
     return neg_image_pairs
 
+
 class ImagePairs(data.Dataset):
     """
     A copy of ImageFolder from torchvision. Output image pairs that are k steps apart.
