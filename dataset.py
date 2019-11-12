@@ -89,11 +89,15 @@ def make_pair(imgs, resets, k, get_img, root):
             return pkl.load(f)
 
     image_pairs = []
-    for i, img in tqdm(enumerate(imgs)):
+    pbar = tqdm(total=len(imgs))
+    for i, img in enumerate(imgs):
         if np.sum(resets[i:i + k]) == 0 and (get_img(imgs[i + k][0]) - get_img(img[0])).abs().max() > 0.5:
             next_img = imgs[i + k]
             image_pairs.append(((img[0], np.array(1.0, dtype='float32')),
                                 (next_img[0], np.array(1.0, dtype='float32'))))
+        pbar.update(1)
+    pbar.close()
+
     with open(filename, 'wb') as f:
         pkl.dump(image_pairs, f)
     return image_pairs
@@ -116,7 +120,8 @@ def make_negative_pairs(imgs, resets, root):
         episodes.append((idxs[i] + 1, idxs[i + 1] + 1)) # (inclusive, exclusive)
 
     neg_image_pairs = []
-    for i, img in tqdm(enumerate(imgs)):
+    pbar = tqdm(total=len(imgs))
+    for i, img in enumerate(imgs):
         ep_idx = np.random.randint(0, len(episodes))
         while episodes[ep_idx][0] <= i < episodes[ep_idx][1]:
             ep_idx = np.random.randint(0, len(episodes))
@@ -125,6 +130,8 @@ def make_negative_pairs(imgs, resets, root):
         next_img = imgs[next_img]
         neg_image_pairs.append(((img[0], np.array(0.0, dtype='float32')),
                                 (next_img[0], np.array(0.0, dtype='float32'))))
+        pbar.update(1)
+    pbar.close()
 
     with open(filename, 'wb') as f:
         pkl.dump(neg_image_pairs, f)

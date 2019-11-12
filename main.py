@@ -37,7 +37,7 @@ parser.add_argument("-loadepoch",
                     default=None,
                     help="epoch number to load from")
 parser.add_argument("-classifier_path", type=str,
-                    default="classifier.pkl",
+                    default="classifier.pt",
                     help="path to classifier parameters. "
                          "The classifier is pretrained on real images to classify "
                          "image pairs that are one step apart. "

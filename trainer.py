@@ -162,10 +162,15 @@ class Trainer:
         # Load rope dataset and apply transformations
         rope_path = os.path.realpath(self.data_dir)
 
+        def filter_background(x):
+            x[:,(x<0.3).any(dim=0)]=0.0
+            return x
+
         trans = [
             transforms.Resize(64),
             transforms.CenterCrop(64),
             transforms.ToTensor(),
+            filter_background,
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ]
 
@@ -187,6 +192,9 @@ class Trainer:
                                                  shuffle=True,
                                                  num_workers=2,
                                                  drop_last=True)
+        from torchvision.utils import save_image
+        imgs = next(iter(dataloader))[0][0]
+        save_image(imgs * 0.5 + 0.5, 'train_img.png')
         ############################################
         # Load eval plan dataset
         planning_data_dir = self.planning_data_dir
