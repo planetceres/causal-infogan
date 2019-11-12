@@ -25,8 +25,8 @@ def train(model, data_loader):
     log_interval = args.log_interval
     n_critic = 5
 
-    optimizerG = optim.Adam(model.gen.parameters(), lr=args.lr, betas=(0, 0.9))
-    optimizerD = optim.Adam(model.disc.parameters(), lr=args.lr, betas=(0, 0.9))
+    optimizerG = optim.Adam(model.G.parameters(), lr=args.lr, betas=(0, 0.9))
+    optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
 
     data_gen = inf_iterator(data_loader)
     filepath = join('out', 'wgan')
@@ -78,13 +78,14 @@ def main():
         transforms.CenterCrop(64),
         transforms.ToTensor(),
         filter_background,
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        lambda x: x.mean(dim=0)[None, :, :],
     ])
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(10, 1, lambda_=10)
+    model = WGAN(10, 1, lambda_=10).cuda()
     train(model, loader)
 
 if __name__ == '__main__':

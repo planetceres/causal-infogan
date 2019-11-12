@@ -345,10 +345,10 @@ class WGAN(nn.Module):
         return samples.cpu()
 
     def generate(self, n):
-        return self.gen.sample(n)
+        return self.G.sample(n)
 
     def discriminate(self, x):
-        return self.disc(x)
+        return self.D(x)
 
     def sample_eps(self, n):
         return torch.rand(n).cuda()
@@ -376,8 +376,8 @@ class SingleD(nn.Module):
     def __init__(self, channel_dim):
         super().__init__()
         self.model = nn.Sequential(
-            # input size (2 or 6) x 64 x64
-            nn.Conv2d(2 * channel_dim, 64, 4, 2, 1),
+            # input size (1 or 3) x 64 x64
+            nn.Conv2d(channel_dim, 64, 4, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
             # 64 x 32 x 32
             nn.Conv2d(64, 128, 4, 2, 1, bias=False),
@@ -417,7 +417,7 @@ class SingleG(nn.Module):
             nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.ConvTranspose2d(64, 2 * channel_dim, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(64, channel_dim, 4, 2, 1, bias=False),
             nn.Tanh(),
         )
 
@@ -425,6 +425,6 @@ class SingleG(nn.Module):
         return self.model(z)
 
     def sample(self, n):
-        z = torch.randn(n, self.noise_dim).cuda()
+        z = torch.randn(n, self.latent_dim, 1, 1).cuda()
         out = self(z)
         return out
