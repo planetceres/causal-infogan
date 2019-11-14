@@ -393,7 +393,7 @@ class SingleD(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             # 512 x 4 x 4
             nn.Conv2d(512, 1, 4),
-            nn.Sigmoid()
+            # nn.Sigmoid()
         )
 
     def forward(self, x):
