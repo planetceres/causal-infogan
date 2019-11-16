@@ -33,9 +33,9 @@ def train(model, fcn, data_loader):
     if not exists(filepath):
         os.makedirs(filepath)
 
-    to_pil = transforms.ToPILImage()
-    rand_rot = transforms.RandomRotation(360)
-    to_tensor = transforms.ToTensor()
+  #  to_pil = transforms.ToPILImage()
+  #  rand_rot = transforms.RandomRotation(360)
+  #  to_tensor = transforms.ToTensor()
 
     pbar = tqdm(total=itrs)
     model.train()
@@ -43,14 +43,14 @@ def train(model, fcn, data_loader):
         for _ in range(n_critic):
             x,  _ = next(data_gen)
             x  = x.cuda()
-            x = apply_fcn_mse(fcn, x).cpu()
+ #           x = apply_fcn_mse(fcn, x).cpu()
             batch_size = x.size(0)
 
-            x = [to_pil(img * 0.5 + 0.5) for img in x]
-            x = [to_tensor(rand_rot(img)) for img in x]
-            x = torch.stack(x, dim=0) * 2 - 1
+#            x = [to_pil(img * 0.5 + 0.5) for img in x]
+#            x = [to_tensor(rand_rot(img)) for img in x]
+#            x = torch.stack(x, dim=0) * 2 - 1
 
-            x = x.cuda()
+#            x = x.cuda()
 
             optimizerD.zero_grad()
             x_tilde = model.generate(batch_size)
@@ -83,9 +83,10 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
 
-    fcn = FCN_mse(2).cuda()
-    fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
-    fcn.eval()
+   # fcn = FCN_mse(2).cuda()
+   # fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
+   # fcn.eval()
+    fcn = None
 
     def filter_background(x):
         x[:, (x < 0.3).any(dim=0)] = 0.0
@@ -96,9 +97,9 @@ def main():
         transforms.CenterCrop(64),
         #transforms.RandomRotation(360),
         transforms.ToTensor(),
-      #  filter_background,
-      #  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-      #  lambda x: x.mean(dim=0)[None, :, :],
+        filter_background,
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        lambda x: x.mean(dim=0)[None, :, :],
     ])
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,

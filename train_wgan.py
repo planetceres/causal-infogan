@@ -25,8 +25,8 @@ def train(model, fcn, data_loader):
     log_interval = args.log_interval
     n_critic = 5
 
-    optimizerG = optim.Adam(model.G.parameters(), lr=args.lr, betas=(0, 0.9))
-    optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
+    optimizerG = optim.Adam(model.gen.parameters(), lr=args.lr, betas=(0, 0.9))
+    optimizerD = optim.Adam(model.disc.parameters(), lr=args.lr, betas=(0, 0.9))
 
     data_gen = inf_iterator(data_loader)
     filepath = join('out', args.name)
@@ -46,15 +46,18 @@ def train(model, fcn, data_loader):
             x_tilde = model.generate(batch_size)
             eps = model.sample_eps(batch_size).view(batch_size, 1, 1, 1)
             x_hat = eps * x + (1 - eps) * x_tilde
-            loss = model.gan_loss(x_tilde, x) + model.grad_penalty(x_hat)
-            loss.backward()
+            disc_loss = model.gan_loss(x_tilde, x)
+            grad_penalty = model.grad_penalty(x_hat)
+            (disc_loss + grad_penalty).backward()
             optimizerD.step()
 
         optimizerG.zero_grad()
         gz = model.generate(batch_size)
-        loss = model.generator_loss(gz)
-        loss.backward()
+        gen_loss = model.generator_loss(gz)
+        gen_loss.backward()
         optimizerG.step()
+
+        pbar.set_description('G: {:.4f}, D: {:.4f}, Pen: {:.4f}'.format(gen_loss.item(), disc_loss.item(), grad_penalty.item()))
 
         if itr % log_interval == 0:
             model.eval()
