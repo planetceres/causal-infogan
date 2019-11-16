@@ -612,7 +612,6 @@ class BigGAN(nn.Module):
         super().__init__()
         self.G = Generator(z_dim, obs_dim, base_size=gen_base_size)
         self.D = Discriminator(obs_dim, base_size=disc_base_size)
-        self._lambda = lambda_
 
     def sample(self, n, cond=None):
         samples = self.generate(n, cond=cond)
@@ -623,7 +622,7 @@ class BigGAN(nn.Module):
         return self.G.sample(n, cond=cond)
 
     def discriminate(self, x, cond=None):
-        return self.D(x, cond=cond)
+        return torch.sigmoid(self.D(x, cond=cond))
 
     def gan_loss(self, x_tilde, x, cond=None):
         Dx_tilde = self.discriminate(x_tilde, cond=cond)
