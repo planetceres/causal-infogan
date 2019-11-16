@@ -11,7 +11,7 @@ from torchvision.utils import save_image
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
 
-from model import WGAN, FCN_mse
+from model import GAN, FCN_mse
 
 def inf_iterator(data_loader):
     epoch = 0
@@ -23,7 +23,7 @@ def inf_iterator(data_loader):
 def train(model, fcn, data_loader):
     itrs = args.itrs
     log_interval = args.log_interval
-    n_critic = 5
+    n_critic = 1
 
     optimizerG = optim.Adam(model.G.parameters(), lr=args.lr, betas=(0, 0.9))
     optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
@@ -33,28 +33,38 @@ def train(model, fcn, data_loader):
     if not exists(filepath):
         os.makedirs(filepath)
 
+    to_pil = transforms.ToPILImage()
+    rand_rot = transforms.RandomRotation(360)
+    to_tensor = transforms.ToTensor()
+
     pbar = tqdm(total=itrs)
     model.train()
     for itr in range(itrs):
         for _ in range(n_critic):
             x,  _ = next(data_gen)
             x  = x.cuda()
-            #x = apply_fcn_mse(fcn, x)
+            x = apply_fcn_mse(fcn, x).cpu()
             batch_size = x.size(0)
+
+            x = [to_pil(img * 0.5 + 0.5) for img in x]
+            x = [to_tensor(rand_rot(img)) for img in x]
+            x = torch.stack(x, dim=0) * 2 - 1
+
+            x = x.cuda()
 
             optimizerD.zero_grad()
             x_tilde = model.generate(batch_size)
-            eps = model.sample_eps(batch_size).view(batch_size, 1, 1, 1)
-            x_hat = eps * x + (1 - eps) * x_tilde
-            loss = model.gan_loss(x_tilde, x) + model.grad_penalty(x_hat)
-            loss.backward()
+            disc_loss = model.gan_loss(x_tilde, x)
+            disc_loss.backward()
             optimizerD.step()
 
         optimizerG.zero_grad()
         gz = model.generate(batch_size)
-        loss = model.generator_loss(gz)
-        loss.backward()
+        gen_loss = model.generator_loss(gz)
+        gen_loss.backward()
         optimizerG.step()
+
+        pbar.set_description('G: {:.4f}, D: {:.4f}'.format(gen_loss.item(), disc_loss.item()))
 
         if itr % log_interval == 0:
             model.eval()
@@ -73,10 +83,9 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
 
-    #fcn = FCN_mse(2).cuda()
-    #fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
-    #fcn.eval()
-    fcn = None
+    fcn = FCN_mse(2).cuda()
+    fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
+    fcn.eval()
 
     def filter_background(x):
         x[:, (x < 0.3).any(dim=0)] = 0.0
@@ -85,16 +94,17 @@ def main():
     transform = transforms.Compose([
         transforms.Resize(64),
         transforms.CenterCrop(64),
+        #transforms.RandomRotation(360),
         transforms.ToTensor(),
-        filter_background,
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        lambda x: x.mean(dim=0)[None, :, :],
+      #  filter_background,
+      #  transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+      #  lambda x: x.mean(dim=0)[None, :, :],
     ])
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(32, 1, lambda_=10).cuda()
+    model = GAN(32, 1).cuda()
     train(model, fcn, loader)
 
 if __name__ == '__main__':
@@ -103,8 +113,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
     parser.add_argument('--itrs', type=int, default=int(1e5))
-    parser.add_argument('--log_interval', type=int, default=500)
+    parser.add_argument('--log_interval', type=int, default=1000)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--name', type=str, default='wgan')
+    parser.add_argument('--name', type=str, default='gan')
     args = parser.parse_args()
     main()

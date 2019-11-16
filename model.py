@@ -372,8 +372,38 @@ class WGAN(nn.Module):
         return -D_gz.mean()
 
 
+class GAN(nn.Module):
+
+    def __init__(self, z_dim, channel_dim, c_dim=0):
+        super().__init__()
+        self.G = SingleG(z_dim, channel_dim, c_dim=c_dim)
+        self.D = SingleD(channel_dim, sigmoid=True)
+
+    def sample(self, n, cond=None):
+        samples = self.generate(n, cond=cond)
+        samples = samples * 0.5 + 0.5
+        return samples.cpu()
+
+    def generate(self, n, cond=None):
+        return self.G.sample(n, cond=cond)
+
+    def discriminate(self, x):
+        return self.D(x)
+
+    def gan_loss(self, x_tilde, x):
+        Dx_tilde = self.discriminate(x_tilde)
+        Dx = self.discriminate(x)
+        pred = torch.cat((Dx_tilde, Dx), dim=0)
+        labels = torch.cat((torch.zeros(Dx_tilde.shape[0]), torch.ones(Dx.shape[0])), dim=0).cuda()
+        return F.binary_cross_entropy(pred, labels)
+
+    def generator_loss(self, gz):
+        D_gz = self.discriminate(gz)
+        labels = torch.ones(D_gz.shape[0]).cuda()
+        return F.binary_cross_entropy(D_gz, labels)
+
 class SingleD(nn.Module):
-    def __init__(self, channel_dim):
+    def __init__(self, channel_dim, sigmoid=False):
         super().__init__()
         self.model = nn.Sequential(
             # input size (1 or 3) x 64 x64
@@ -395,9 +425,10 @@ class SingleD(nn.Module):
             nn.Conv2d(512, 1, 4),
             # nn.Sigmoid()
         )
+        self.sigmoid = sigmoid
 
     def forward(self, x):
-        return self.model(x)
+        return torch.sigmoid(self.model(x)) if self.sigmoid else self.model(x)
 
 
 class SingleG(nn.Module):
