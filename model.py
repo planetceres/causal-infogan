@@ -607,6 +607,36 @@ class Discriminator(nn.Module):
         return x
 
 
+class BigGAN(nn.Module):
+    def __init__(self, obs_dim, gen_base_size=4, disc_base_size=8, z_dim=32):
+        super().__init__()
+        self.G = Generator(z_dim, obs_dim, base_size=gen_base_size)
+        self.D = Discriminator(obs_dim, base_size=disc_base_size)
+        self._lambda = lambda_
+
+    def sample(self, n, cond=None):
+        samples = self.generate(n, cond=cond)
+        samples = torch.clamp(samples * 0.5 + 0.5, 0, 1)
+        return samples.cpu()
+
+    def generate(self, n, cond=None):
+        return self.G.sample(n, cond=cond)
+
+    def discriminate(self, x, cond=None):
+        return self.D(x, cond=cond)
+
+    def gan_loss(self, x_tilde, x, cond=None):
+        Dx_tilde = self.discriminate(x_tilde, cond=cond)
+        Dx = self.discriminate(x, cond=cond)
+        pred = torch.cat((Dx_tilde, Dx), dim=0)
+        labels = torch.cat((torch.zeros(Dx_tilde.shape[0]), torch.ones(Dx.shape[0])), dim=0).cuda()
+        return F.binary_cross_entropy(pred, labels)
+
+    def generator_loss(self, gz, cond=None):
+        D_gz = self.discriminate(gz, cond=cond)
+        labels = torch.ones(D_gz.shape[0]).cuda()
+        return F.binary_cross_entropy(D_gz, labels)
+
 class BigWGAN(nn.Module):
     def __init__(self, obs_dim, conditional=False, cond_shape=None, lambda_=10,
                  gen_base_size=4, disc_base_size=8, z_dim=32):
