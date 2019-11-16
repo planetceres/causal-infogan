@@ -11,7 +11,7 @@ from torchvision.utils import save_image
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
 
-from model import WGAN, FCN_mse
+from model import WGAN, FCN_mse, BigWGAN
 
 def inf_iterator(data_loader):
     epoch = 0
@@ -94,7 +94,7 @@ def main():
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(32, 1, lambda_=10).cuda()
+    model = BigWGAN((1, 64, 64), z_dim=32).cuda()
     train(model, fcn, loader)
 
 if __name__ == '__main__':

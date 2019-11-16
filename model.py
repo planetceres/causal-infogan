@@ -463,3 +463,194 @@ class SingleG(nn.Module):
         z = z.unsqueeze(-1).unsqueeze(-1)
         out = self(z)
         return out
+
+
+################################################################################################
+#############                  Larger GAN Architectures                    #####################
+################################################################################################
+
+class Conv2DUpsample(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super(Conv2DUpsample, self).__init__()
+        assert kernel_size % 2 == 1
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=kernel_size // 2)
+
+    def forward(self, x):
+        x = F.interpolate(x, scale_factor=2, mode='nearest')
+        return self.conv(x)
+
+class Conv2DDownsample(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super(Conv2DDownsample, self).__init__()
+        assert kernel_size % 2 == 1
+        self.downsample = nn.AvgPool2d(2)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=kernel_size // 2)
+
+    def forward(self, x):
+        x = self.downsample(x)
+        return self.conv(x)
+
+class ResBlockUp(nn.Module):
+    def __init__(self, in_channels, n_filters, filter_size):
+        super(ResBlockUp, self).__init__()
+        assert filter_size % 2 == 1
+
+        self.bn1 = nn.BatchNorm2d(in_channels)
+        self.conv = nn.Conv2d(in_channels, n_filters, filter_size, padding=filter_size // 2)
+        self.bn2 = nn.BatchNorm2d(n_filters)
+        self.upsample1 = Conv2DUpsample(n_filters, n_filters, filter_size)
+        self.upsample2 = Conv2DUpsample(in_channels, n_filters, 1)
+
+    def forward(self, x):
+        _x = F.relu(self.bn1(x))
+        _x = self.conv(_x)
+        _x = F.relu(self.bn2(x))
+        _x = self.upsample1(_x)
+        return _x + self.upsample2(x)
+
+
+class ResBlockDown(nn.Module):
+    def __init__(self, in_channels, n_filters, filter_size):
+        super(ResBlockDown, self).__init__()
+        assert filter_size % 2 == 1
+        self.conv = nn.Conv2d(in_channels, n_filters, filter_size, padding=filter_size // 2)
+        self.downsample1 = Conv2DDownsample(n_filters, n_filters, filter_size)
+        self.downsample2 = Conv2DDownsample(in_channels, n_filters, 1)
+
+    def forward(self, x):
+        _x = self.conv(x)
+        _x = F.relu(_x)
+        _x = self.downsample1(_x)
+        return _x + self.downsample2(x)
+
+
+class ResBlock(nn.Module):
+    def __init__(self, in_channels, n_filters, filter_size):
+        super(ResBlock, self).__init__()
+        assert filter_size % 2 == 1
+        self.conv = nn.Conv2d(in_channels, n_filters, filter_size, padding=filter_size // 2)
+
+    def forward(self, x):
+        _x = self.conv(x)
+        _x = F.relu(_x)
+        return _x + x
+
+
+class Generator(nn.Module):
+    def __init__(self, noise_dim, obs_dim, base_size=4, n_filters=128,
+                 conditional=False, cond_shape=None):
+        super(Generator, self).__init__()
+        self.noise_dim = noise_dim
+
+        self._n_filters = n_filters
+        n_upsample = int(np.log2(obs_dim[1] // base_size))
+
+        input_dim = noise_dim + cond_shape[0] if conditional else noise_dim
+        self.fc = nn.Linear(input_dim, base_size ** 2 * n_filters)
+        self.res_blocks = nn.ModuleList([ResBlockUp(n_filters, n_filters, 3)
+                                         for _ in range(n_upsample)])
+        self.bn = nn.BatchNorm2d(n_filters)
+        self.conv = nn.Conv2d(n_filters, obs_dim[0], 3, padding=1)
+
+        self.conditional = conditional
+        self.base_size = base_size
+
+    def forward(self, z):
+        z_ = z
+        z = self.fc(z)
+        z = z.view(-1, self._n_filters, self.base_size, self.base_size)
+        for block in self.res_blocks:
+            z = block(z)
+        z = F.relu(self.bn(z))
+        z = torch.tanh(self.conv(z))
+        return z
+
+    def sample(self, n, cond=None):
+        z = torch.randn(n, self.noise_dim).cuda()
+        if self.conditional:
+            z = torch.cat((z, cond), dim=1)
+        out = self(z)
+        return out
+
+class Discriminator(nn.Module):
+    def __init__(self, obs_dim, base_size=8, n_filters=128, conditional=False, cond_shape=None):
+        super(Discriminator, self).__init__()
+        self.res_block_downs = nn.ModuleList()
+        prev_channels = obs_dim[0]
+        n_down_sample = int(np.log2(obs_dim[1] // base_size))
+        print('Discriminator n_down_sample', n_down_sample)
+        for _ in range(n_down_sample):
+            self.res_block_downs.append(ResBlockDown(prev_channels, n_filters, 3))
+            prev_channels = n_filters
+        self.res_block1 = ResBlock(n_filters, n_filters, 3)
+        self.res_block2 = ResBlock(n_filters, n_filters, 3)
+        self.fc = nn.Linear(n_filters, 1)
+
+        if conditional:
+            self.fc_conds = nn.ModuleList()
+            for _ in range(n_down_sample):
+                self.fc_conds.append(nn.Linear(cond_shape[0], n_filters))
+
+        self.conditional = conditional
+
+    def forward(self, x, cond=None):
+        for i, res_block_down in enumerate(self.res_block_downs):
+            x = res_block_down(x)
+            if self.conditional:
+                cond_i = self.fc_conds[i](cond).unsqueeze(-1).unsqueeze(-1)
+                x += cond_i
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = F.relu(x)
+        x = x.sum(2).sum(2)
+        x = self.fc(x)
+        return x
+
+
+class BigWGAN(nn.Module):
+    def __init__(self, obs_dim, conditional=False, cond_shape=None, lambda_=10,
+                 gen_base_size=4, disc_base_size=8, z_dim=32):
+        super().__init__()
+        if cond_shape is not None:
+            assert len(cond_shape) == 1
+
+        self.gen = Generator(z_dim, obs_dim, base_size=gen_base_size,
+                             conditional=conditional, cond_shape=cond_shape)
+        self.disc = Discriminator(obs_dim, base_size=disc_base_size,
+                                  conditional=conditional, cond_shape=cond_shape)
+        self._lambda = lambda_
+
+    def sample(self, n, cond=None):
+        samples = self.generate(n, cond=cond)
+        samples = torch.clamp(samples * 0.5 + 0.5, 0, 1)
+        return samples.cpu()
+
+    def generate(self, n, cond=None):
+        return self.gen.sample(n, cond=cond)
+
+    def discriminate(self, x, cond=None):
+        return self.disc(x, cond=cond)
+
+    def sample_eps(self, n):
+        return torch.rand(n).cuda()
+
+    def grad_penalty(self, x_hat, cond=None):
+        Dx_hat = self.discriminate(x_hat, cond=cond)
+        grads = autograd.grad(Dx_hat, x_hat, torch.ones_like(Dx_hat),
+                              retain_graph=True, create_graph=True, only_inputs=True)[0]
+        grads = grads.view(grads.size(0), -1)
+        grad_norms = torch.sqrt((grads ** 2).sum(-1))
+        grad_penalty = self._lambda * (grad_norms - 1) ** 2
+        return grad_penalty.mean()
+
+    def gan_loss(self, x_tilde, x, cond=None):
+        Dx_tilde = self.discriminate(x_tilde, cond=cond)
+        Dx = self.discriminate(x, cond=cond)
+        return (Dx_tilde - Dx).mean()
+
+    def generator_loss(self, gz, cond=None):
+        D_gz = self.discriminate(gz, cond=cond)
+        return -D_gz.mean()
+
+    def set_temperature(self, temperature):
+        self.temperature = temperature
