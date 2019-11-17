@@ -538,25 +538,23 @@ class ResBlock(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self, noise_dim, obs_dim, base_size=4, n_filters=128,
-                 conditional=False, cond_shape=None):
+                 c_dim=0):
         super(Generator, self).__init__()
         self.noise_dim = noise_dim
 
         self._n_filters = n_filters
         n_upsample = int(np.log2(obs_dim[1] // base_size))
 
-        input_dim = noise_dim + cond_shape[0] if conditional else noise_dim
+        input_dim = noise_dim + c_dim
         self.fc = nn.Linear(input_dim, base_size ** 2 * n_filters)
         self.res_blocks = nn.ModuleList([ResBlockUp(n_filters, n_filters, 3)
                                          for _ in range(n_upsample)])
         self.bn = nn.BatchNorm2d(n_filters)
         self.conv = nn.Conv2d(n_filters, obs_dim[0], 3, padding=1)
 
-        self.conditional = conditional
         self.base_size = base_size
 
     def forward(self, z):
-        z_ = z
         z = self.fc(z)
         z = z.view(-1, self._n_filters, self.base_size, self.base_size)
         for block in self.res_blocks:
@@ -567,13 +565,13 @@ class Generator(nn.Module):
 
     def sample(self, n, cond=None):
         z = torch.randn(n, self.noise_dim).cuda()
-        if self.conditional:
+        if cond is not None:
             z = torch.cat((z, cond), dim=1)
         out = self(z)
         return out
 
 class Discriminator(nn.Module):
-    def __init__(self, obs_dim, base_size=8, n_filters=128, conditional=False, cond_shape=None):
+    def __init__(self, obs_dim, base_size=8, n_filters=128):
         super(Discriminator, self).__init__()
         self.res_block_downs = nn.ModuleList()
         prev_channels = obs_dim[0]
@@ -586,19 +584,9 @@ class Discriminator(nn.Module):
         self.res_block2 = ResBlock(n_filters, n_filters, 3)
         self.fc = nn.Linear(n_filters, 1)
 
-        if conditional:
-            self.fc_conds = nn.ModuleList()
-            for _ in range(n_down_sample):
-                self.fc_conds.append(nn.Linear(cond_shape[0], n_filters))
-
-        self.conditional = conditional
-
-    def forward(self, x, cond=None):
+    def forward(self, x):
         for i, res_block_down in enumerate(self.res_block_downs):
             x = res_block_down(x)
-            if self.conditional:
-                cond_i = self.fc_conds[i](cond).unsqueeze(-1).unsqueeze(-1)
-                x += cond_i
         x = self.res_block1(x)
         x = self.res_block2(x)
         x = F.relu(x)
@@ -637,16 +625,11 @@ class BigGAN(nn.Module):
         return F.binary_cross_entropy(D_gz, labels)
 
 class BigWGAN(nn.Module):
-    def __init__(self, obs_dim, conditional=False, cond_shape=None, lambda_=10,
-                 gen_base_size=4, disc_base_size=8, z_dim=32):
+    def __init__(self, obs_dim, lambda_=10,
+                 gen_base_size=4, disc_base_size=8, z_dim=32, c_dim=0):
         super().__init__()
-        if cond_shape is not None:
-            assert len(cond_shape) == 1
-
-        self.gen = Generator(z_dim, obs_dim, base_size=gen_base_size,
-                             conditional=conditional, cond_shape=cond_shape)
-        self.disc = Discriminator(obs_dim, base_size=disc_base_size,
-                                  conditional=conditional, cond_shape=cond_shape)
+        self.gen = Generator(z_dim, obs_dim, base_size=gen_base_size, c_dim=c_dim)
+        self.disc = Discriminator(obs_dim, base_size=disc_base_size)
         self._lambda = lambda_
 
     def sample(self, n, cond=None):
@@ -657,14 +640,14 @@ class BigWGAN(nn.Module):
     def generate(self, n, cond=None):
         return self.gen.sample(n, cond=cond)
 
-    def discriminate(self, x, cond=None):
-        return self.disc(x, cond=cond)
+    def discriminate(self, x):
+        return self.disc(x)
 
     def sample_eps(self, n):
         return torch.rand(n).cuda()
 
-    def grad_penalty(self, x_hat, cond=None):
-        Dx_hat = self.discriminate(x_hat, cond=cond)
+    def grad_penalty(self, x_hat):
+        Dx_hat = self.discriminate(x_hat)
         grads = autograd.grad(Dx_hat, x_hat, torch.ones_like(Dx_hat),
                               retain_graph=True, create_graph=True, only_inputs=True)[0]
         grads = grads.view(grads.size(0), -1)
@@ -672,14 +655,11 @@ class BigWGAN(nn.Module):
         grad_penalty = self._lambda * (grad_norms - 1) ** 2
         return grad_penalty.mean()
 
-    def gan_loss(self, x_tilde, x, cond=None):
-        Dx_tilde = self.discriminate(x_tilde, cond=cond)
-        Dx = self.discriminate(x, cond=cond)
+    def gan_loss(self, x_tilde, x):
+        Dx_tilde = self.discriminate(x_tilde)
+        Dx = self.discriminate(x)
         return (Dx_tilde - Dx).mean()
 
-    def generator_loss(self, gz, cond=None):
-        D_gz = self.discriminate(gz, cond=cond)
+    def generator_loss(self, gz):
+        D_gz = self.discriminate(gz)
         return -D_gz.mean()
-
-    def set_temperature(self, temperature):
-        self.temperature = temperature

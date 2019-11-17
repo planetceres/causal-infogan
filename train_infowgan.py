@@ -11,7 +11,7 @@ from torchvision.utils import save_image
 from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
 
-from model import WGAN, GaussianPosterior, UniformDistribution
+from model import BigWGAN, GaussianPosterior, UniformDistribution
 
 def inf_iterator(data_loader):
     epoch = 0
@@ -95,7 +95,7 @@ def main():
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(args.z_dim, 1, c_dim=args.c_dim, lambda_=10).cuda()
+    model = BigWGAN((1, 64, 64), z_dim=args.z_dim, c_dim=args.c_dim).cuda()
     posterior = GaussianPosterior(args.c_dim, 1, 1).cuda()
     prior = UniformDistribution(s_dim=args.c_dim)
     train(model, posterior, prior, loader)
