@@ -31,10 +31,11 @@ def train(model, posterior, prior, data_loader):
     optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
 
     data_gen = inf_iterator(data_loader)
-    filepath = join('out', 'info_wgan')
+    filepath = join('out', args.name)
     if not exists(filepath):
         os.makedirs(filepath)
 
+    saved = False
     pbar = tqdm(total=itrs)
     model.train()
     for itr in range(itrs):
@@ -42,6 +43,10 @@ def train(model, posterior, prior, data_loader):
             x,  _ = next(data_gen)
             x  = x.cuda()
             batch_size = x.size(0)
+
+            if not saved:
+                save_image(x * 0.5 + 0.5, 'example_dset_infowgan.png')
+                saved = True
 
             optimizerD.zero_grad()
             c = prior.sample(batch_size)
@@ -68,7 +73,7 @@ def train(model, posterior, prior, data_loader):
             model.eval()
             c = prior.sample(8)
             samples = torch.cat([model.sample(8, c) for _ in range(8)], dim=0)
-            save_image(samples, join(filepath, 'samples_itr{}.png'.format(itr)))
+            save_image(samples, join(filepath, 'samples_itr{}.png'.format(itr)), nrow=8)
             model.train()
 
         pbar.update(1)
@@ -111,6 +116,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--z_dim', type=int, default=5)
     parser.add_argument('--c_dim', type=int, default=10)
+    parser.add_argument('--name', type=str, default='infowgan')
 
     args = parser.parse_args()
     main()

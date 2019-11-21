@@ -7,6 +7,7 @@ from scipy.ndimage.morphology import grey_dilation
 import torch
 import torch.optim as optim
 import torch.utils.data as data
+from torch.nn.utils import clip_grad_norm_
 
 from torchvision.utils import save_image
 from torchvision.datasets import ImageFolder
@@ -21,10 +22,18 @@ def inf_iterator(data_loader):
             yield batch
         epoch += 1
 
+def norm(parameters):
+    total = 0
+    for p in parameters:
+        param_norm = p.grad.data.norm(2)
+        total += param_norm.item() ** 2
+    return total ** 0.5
+
 def train(model, fcn, data_loader):
     itrs = args.itrs
     log_interval = args.log_interval
     n_critic = 1
+    n_gen = 1
 
     optimizerG = optim.Adam(model.G.parameters(), lr=args.lr, betas=(0, 0.9))
     optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
@@ -38,14 +47,20 @@ def train(model, fcn, data_loader):
   #  rand_rot = transforms.RandomRotation(360)
   #  to_tensor = transforms.ToTensor()
 
+    saved = False
     pbar = tqdm(total=itrs)
     model.train()
+    max_g, max_d = float('-inf'), float('-inf')
     for itr in range(itrs):
         for _ in range(n_critic):
             x,  _ = next(data_gen)
             x  = x.cuda()
  #           x = apply_fcn_mse(fcn, x).cpu()
             batch_size = x.size(0)
+
+            if not saved:
+                save_image(x * 0.5 + 0.5, 'example_gan_dset.png')
+                saved = True
 
 #            x = [to_pil(img * 0.5 + 0.5) for img in x]
 #            x = [to_tensor(rand_rot(img)) for img in x]
@@ -59,13 +74,19 @@ def train(model, fcn, data_loader):
             disc_loss.backward()
             optimizerD.step()
 
-        optimizerG.zero_grad()
-        gz = model.generate(batch_size)
-        gen_loss = model.generator_loss(gz)
-        gen_loss.backward()
-        optimizerG.step()
+            d_norm = norm(model.D.parameters())
 
-        pbar.set_description('G: {:.4f}, D: {:.4f}'.format(gen_loss.item(), disc_loss.item()))
+        for _ in range(n_gen):
+            optimizerG.zero_grad()
+            gz = model.generate(batch_size)
+            gen_loss = model.generator_loss(gz)
+            gen_loss.backward()
+            optimizerG.step()
+            g_norm = norm(model.G.parameters())
+
+        max_g = max(max_g, g_norm)
+        max_d = max(max_d, d_norm)
+        pbar.set_description('G: {:.4f}, D: {:.4f}, g (cur/max) {:.4f}/{:.4f}, d (cur/max) {:.4f}/{:.4f}'.format(gen_loss.item(), disc_loss.item(), g_norm, max_g, d_norm, max_d))
 
         if itr % log_interval == 0:
             model.eval()
@@ -95,7 +116,7 @@ def main():
 
     def dilate(x):
         x = x.squeeze(0).numpy()
-        x = grey_dilation(x, size=3)
+        x = grey_dilation(x, size=5)
         x = x[None, :, :]
         return torch.from_numpy(x)
 
