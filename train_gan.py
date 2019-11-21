@@ -2,6 +2,7 @@ import os
 from os.path import join, exists
 from tqdm import tqdm
 import argparse
+from scipy.ndimage.morphology import grey_dilation
 
 import torch
 import torch.optim as optim
@@ -92,21 +93,28 @@ def main():
         x[:, (x < 0.3).any(dim=0)] = 0.0
         return x
 
+    def dilate(x):
+        x = x.squeeze(0).numpy()
+        x = grey_dilation(x, size=3)
+        x = x[None, :, :]
+        return torch.from_numpy(x)
+
     transform = transforms.Compose([
         transforms.Resize(64),
         transforms.CenterCrop(64),
-        #transforms.RandomRotation(360),
         transforms.ToTensor(),
         filter_background,
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         lambda x: x.mean(dim=0)[None, :, :],
+        dilate,
+        transforms.Normalize((0.5,), (0.5,)),
     ])
+
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    # model = GAN(32, 1).cuda()
-    model = BigGAN((1, 64, 64), z_dim=32).cuda()
+    model = GAN(32, 1).cuda()
+    # model = BigGAN((1, 64, 64), z_dim=32).cuda()
     train(model, fcn, loader)
 
 if __name__ == '__main__':
