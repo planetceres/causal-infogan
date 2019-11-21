@@ -2,6 +2,7 @@ import os
 from os.path import join, exists
 from tqdm import tqdm
 import argparse
+from scipy.ndimage.morphology import grey_dilation
 
 import torch
 import torch.optim as optim
@@ -23,7 +24,7 @@ def inf_iterator(data_loader):
 def train(model, fcn, data_loader):
     itrs = args.itrs
     log_interval = args.log_interval
-    n_critic = 5
+    n_critic = 2
 
     optimizerG = optim.Adam(model.gen.parameters(), lr=args.lr, betas=(0, 0.9))
     optimizerD = optim.Adam(model.disc.parameters(), lr=args.lr, betas=(0, 0.9))
@@ -33,6 +34,7 @@ def train(model, fcn, data_loader):
     if not exists(filepath):
         os.makedirs(filepath)
 
+    saved = False
     pbar = tqdm(total=itrs)
     model.train()
     for itr in range(itrs):
@@ -41,6 +43,10 @@ def train(model, fcn, data_loader):
             x  = x.cuda()
             #x = apply_fcn_mse(fcn, x)
             batch_size = x.size(0)
+
+            if not saved:
+                save_image(x * 0.5 + 0.5, join(filepath, 'example_dset.png'))
+                saved = True
 
             optimizerD.zero_grad()
             x_tilde = model.generate(batch_size)
@@ -85,19 +91,28 @@ def main():
         x[:, (x < 0.3).any(dim=0)] = 0.0
         return x
 
+    def dilate(x):
+        x = x.squeeze(0).numpy()
+        x = grey_dilation(x, size=3)
+        x = x[None, :, :]
+        return torch.from_numpy(x)
+
     transform = transforms.Compose([
         transforms.Resize(64),
         transforms.CenterCrop(64),
         transforms.ToTensor(),
         filter_background,
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         lambda x: x.mean(dim=0)[None, :, :],
+        dilate,
+        transforms.Normalize((0.5,), (0.5,)),
     ])
+
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = BigWGAN((1, 64, 64), z_dim=32).cuda()
+    model = WGAN(32, 1)
+    # model = BigWGAN((1, 64, 64), z_dim=32).cuda()
     train(model, fcn, loader)
 
 if __name__ == '__main__':
