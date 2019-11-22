@@ -81,7 +81,7 @@ class D(nn.Module):
 
 class LargeD(nn.Module):
     def __init__(self, dtype, channel_dim):
-        super(Discriminator, self).__init__()
+        super().__init__()
 
         obs_dim = (channel_dim * 2, 64, 64)
         base_size, n_filters = 8, 128
@@ -97,8 +97,7 @@ class LargeD(nn.Module):
         self.res_block2 = ResBlock(n_filters, n_filters, 3)
         self.fc = nn.Linear(n_filters, 1)
 
-    def forward(self, o, o_next):
-        x = torch.cat([o, o_next], dim=1)
+    def forward(self, x):
         for i, res_block_down in enumerate(self.res_block_downs):
             x = res_block_down(x)
         x = self.res_block1(x)
@@ -238,7 +237,7 @@ class G(nn.Module):
 
 class LargeG(nn.Module):
     def __init__(self, c_dim, z_dim, gtype, channel_dim):
-        super(G, self).__init__()
+        super().__init__()
         self.latent_dim = z_dim + 2 * c_dim
         self.z_dim = z_dim
         self.c_dim = c_dim
@@ -254,6 +253,7 @@ class LargeG(nn.Module):
         self.conv = nn.Conv2d(n_filters, 2 * channel_dim, 3, padding=1)
 
         self.base_size = base_size
+        self._n_filters = n_filters
 
     def forward(self, z, c, c_next):
         z = torch.cat([z, c, c_next], dim=1)
@@ -263,7 +263,7 @@ class LargeG(nn.Module):
             z = block(z)
         z = F.relu(self.bn(z))
         z = torch.tanh(self.conv(z))
-        return z
+        return z.chunk(2, dim=1)
 
 
 class GaussianTransition(nn.Module):

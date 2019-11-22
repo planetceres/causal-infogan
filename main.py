@@ -159,7 +159,7 @@ loadepoch = kwargs['loadepoch']
 for i in var_list:
     print(i)
     i.cuda()
-    i.apply(weights_init)
+    #i.apply(weights_init)
     if loadpath:
         if i not in [p]:
             try:

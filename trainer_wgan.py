@@ -256,20 +256,22 @@ class Trainer:
                 # D Loss (Update D)
                 optimD.zero_grad()
                 # Real data
-                critic_real = self.D(real_o, real_o_next)
+                real_input = torch.cat([real_o, real_o_next], dim=1)
                 # Fake data
                 z, c, c_next = self._noise_sample(z, bs)
                 fake_o, fake_o_next = self.G(z, c, c_next)
-                critic_fake = self.D(fake_o.detach(), fake_o_next.detach())
-
-                D_loss = (critic_fake - critic_real).mean()
+                fake_input = torch.cat([fake_o, fake_o_next], dim=1)
 
                 # Gradient penalty
                 eps = torch.rand(bs).cuda().view(bs, 1, 1, 1)
-                o_hat = eps * real_o + (1 - eps) * fake_o
-                o_next_hat = eps * real_o_next + (1 - eps) * fake_o_next
-                critic_hat = self.D(o_hat, o_next_hat)
-                grads = autograd.grad(critic_hat, torch.cat([o_hat, o_next_hat], dim=1),
+                o_hat_input = eps * real_input + (1 - eps) * fake_input
+
+                critic_real = self.D(real_input)
+                critic_fake = self.D(fake_input)
+                D_loss = (critic_fake - critic_real).mean()
+
+                critic_hat = self.D(o_hat_input)
+                grads = autograd.grad(critic_hat, o_hat_input,
                                       torch.ones_like(critic_hat), retain_graph=True,
                                       create_graph=True, only_inputs=True)[0]
                 grads = grads.view(grads.size(0), -1)
@@ -286,7 +288,11 @@ class Trainer:
                 # G loss (Update G)
                 optimG.zero_grad()
 
-                critic_fake_2 = self.D(fake_o, fake_o_next)
+                z, c, c_next = self._noise_sample(z, bs)
+                fake_o, fake_o_next = self.G(z, c, c_next)
+                fake_input = torch.cat([fake_o, fake_o_next], dim=1)
+
+                critic_fake_2 = self.D(fake_input)
                 G_loss = -critic_fake_2.mean()
 
                 # Q loss (Update G, T, Q)
@@ -684,7 +690,7 @@ class Trainer:
         else:
             assert metric == 'D'
             # turned max into min using minus.
-            f = lambda x, y: - self.D(x, y).view(-1)
+            f = lambda x, y: - self.D(torch.cat([x, y], dim=1)).view(-1)
 
         if regress_bs:
             z_var = Variable(0.1 * torch.randn(n_trials, self.rand_z_dim).cuda(), requires_grad=True)

@@ -27,9 +27,9 @@ def train(model, posterior, prior, data_loader):
     n_critic = 5
     infow = 0.1
 
-    optimizerG = optim.Adam(list(model.G.parameters()) + list(posterior.parameters()),
+    optimizerG = optim.Adam(list(model.gen.parameters()) + list(posterior.parameters()),
                             lr=args.lr, betas=(0, 0.9))
-    optimizerD = optim.Adam(model.D.parameters(), lr=args.lr, betas=(0, 0.9))
+    optimizerD = optim.Adam(model.disc.parameters(), lr=args.lr, betas=(0, 0.9))
 
     data_gen = inf_iterator(data_loader)
     filepath = join('out', args.name)
