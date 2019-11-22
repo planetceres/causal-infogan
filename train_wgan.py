@@ -24,7 +24,7 @@ def inf_iterator(data_loader):
 def train(model, fcn, data_loader):
     itrs = args.itrs
     log_interval = args.log_interval
-    n_critic = 2
+    n_critic = 5
 
     optimizerG = optim.Adam(model.gen.parameters(), lr=args.lr, betas=(0, 0.9))
     optimizerD = optim.Adam(model.disc.parameters(), lr=args.lr, betas=(0, 0.9))
@@ -111,8 +111,8 @@ def main():
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                              pin_memory=True, num_workers=2)
 
-    model = WGAN(32, 1)
-    # model = BigWGAN((1, 64, 64), z_dim=32).cuda()
+   # model = WGAN(32, 1).cuda()
+    model = BigWGAN((1, 64, 64), z_dim=32).cuda()
     train(model, fcn, loader)
 
 if __name__ == '__main__':
