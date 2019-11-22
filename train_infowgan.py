@@ -2,6 +2,7 @@ import os
 from os.path import join, exists
 from tqdm import tqdm
 import argparse
+from scipy.ndimage.morphology import grey_dilation
 
 import torch
 import torch.optim as optim
@@ -45,7 +46,7 @@ def train(model, posterior, prior, data_loader):
             batch_size = x.size(0)
 
             if not saved:
-                save_image(x * 0.5 + 0.5, 'example_dset_infowgan.png')
+                save_image(x * 0.5 + 0.5, join(filepath, 'example_dset_infowgan.png'))
                 saved = True
 
             optimizerD.zero_grad()
@@ -88,13 +89,20 @@ def main():
         x[:, (x < 0.3).any(dim=0)] = 0.0
         return x
 
+    def dilate(x):
+        x = x.squeeze(0).numpy()
+        x = grey_dilation(x, size=3)
+        x = x[None, :, :]
+        return torch.from_numpy(x)
+
     transform = transforms.Compose([
         transforms.Resize(64),
         transforms.CenterCrop(64),
         transforms.ToTensor(),
         filter_background,
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         lambda x: x.mean(dim=0)[None, :, :],
+        dilate,
+        transforms.Normalize((0.5,), (0.5,)),
     ])
     dataset = ImageFolder(args.root, transform=transform)
     loader = data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
