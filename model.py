@@ -79,6 +79,37 @@ class D(nn.Module):
             raise NotImplementedError("dtype %d has not been implemented." % self.dtype)
 
 
+class LargeD(nn.Module):
+    def __init__(self, dtype, channel_dim):
+        super(Discriminator, self).__init__()
+
+        obs_dim = (channel_dim * 2, 64, 64)
+        base_size, n_filters = 8, 128
+
+        self.res_block_downs = nn.ModuleList()
+        prev_channels = obs_dim[0]
+        n_down_sample = int(np.log2(obs_dim[1] // base_size))
+        print('Discriminator n_down_sample', n_down_sample)
+        for _ in range(n_down_sample):
+            self.res_block_downs.append(ResBlockDown(prev_channels, n_filters, 3))
+            prev_channels = n_filters
+        self.res_block1 = ResBlock(n_filters, n_filters, 3)
+        self.res_block2 = ResBlock(n_filters, n_filters, 3)
+        self.fc = nn.Linear(n_filters, 1)
+
+    def forward(self, o, o_next):
+        x = torch.cat([o, o_next], dim=1)
+        for i, res_block_down in enumerate(self.res_block_downs):
+            x = res_block_down(x)
+        x = self.res_block1(x)
+        x = self.res_block2(x)
+        x = F.relu(x)
+        x = x.sum(2).sum(2)
+        x = self.fc(x)
+        return x
+
+
+
 class GaussianPosterior(nn.Module):
     """
     Estimate the Gaussian posterior distribution on states.
@@ -203,6 +234,36 @@ class G(nn.Module):
             return output[:, :self.channel_dim, :, :], output[:, self.channel_dim:, :, :]
         else:
             raise NotImplementedError("gtype %d has not been implemented." % self.gtype)
+
+
+class LargeG(nn.Module):
+    def __init__(self, c_dim, z_dim, gtype, channel_dim):
+        super(G, self).__init__()
+        self.latent_dim = z_dim + 2 * c_dim
+        self.z_dim = z_dim
+        self.c_dim = c_dim
+        self.channel_dim = channel_dim
+
+        base_size, n_filters = 4, 128
+        n_upsample = 4
+
+        self.fc = nn.Linear(self.latent_dim, base_size ** 2 * n_filters)
+        self.res_blocks = nn.ModuleList([ResBlockUp(n_filters, n_filters, 3)
+                                         for _ in range(n_upsample)])
+        self.bn = nn.BatchNorm2d(n_filters)
+        self.conv = nn.Conv2d(n_filters, 2 * channel_dim, 3, padding=1)
+
+        self.base_size = base_size
+
+    def forward(self, z, c, c_next):
+        z = torch.cat([z, c, c_next], dim=1)
+        z = self.fc(z)
+        z = z.view(-1, self._n_filters, self.base_size, self.base_size)
+        for block in self.res_blocks:
+            z = block(z)
+        z = F.relu(self.bn(z))
+        z = torch.tanh(self.conv(z))
+        return z
 
 
 class GaussianTransition(nn.Module):

@@ -1,6 +1,6 @@
 import sys
 import argparse
-from trainer import Trainer
+from trainer_wgan import Trainer
 from model import *
 parser = argparse.ArgumentParser()
 
@@ -137,8 +137,8 @@ with open('%s/params.json' % out_dir, 'w') as fp:
 c_dim = kwargs['cont_code_dim']
 z_dim = kwargs['random_noise_dim']
 
-g = G(c_dim, z_dim, kwargs['gtype'], channel_dim)
-d = D(kwargs['dtype'], channel_dim)
+g = LargeG(c_dim, z_dim, kwargs['gtype'], channel_dim)
+d = LargeD(kwargs['dtype'], channel_dim)
 q = GaussianPosterior(c_dim, kwargs['qtype'], channel_dim)
 t = GaussianTransition(c_dim,
                        hidden=kwargs['tsize'],

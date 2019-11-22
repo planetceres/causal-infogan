@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torchvision.datasets as dset
 import torchvision.transforms as transforms
 
+import torch.autograd as autograd
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
@@ -145,6 +146,8 @@ class Trainer:
         return next_observation.data.cpu().numpy()
 
     def train(self):
+        lambda_ = 10
+
         # Set up training.
         real_o = Variable(torch.FloatTensor(self.batch_size, 3, 64, 64).cuda(), requires_grad=False)
         real_o_next = Variable(torch.FloatTensor(self.batch_size, 3, 64, 64).cuda(), requires_grad=False)
@@ -253,29 +256,38 @@ class Trainer:
                 # D Loss (Update D)
                 optimD.zero_grad()
                 # Real data
-                probs_real = self.D(real_o, real_o_next)
-                label.data.fill_(1)
-                loss_real = criterionD(probs_real, label)
-                loss_real.backward()
-
+                critic_real = self.D(real_o, real_o_next)
                 # Fake data
                 z, c, c_next = self._noise_sample(z, bs)
                 fake_o, fake_o_next = self.G(z, c, c_next)
-                probs_fake = self.D(fake_o.detach(), fake_o_next.detach())
-                label.data.fill_(0)
-                loss_fake = criterionD(probs_fake, label)
-                loss_fake.backward()
+                critic_fake = self.D(fake_o.detach(), fake_o_next.detach())
 
-                D_loss = loss_real + loss_fake
+                D_loss = (critic_fake - critic_real).mean()
 
+                # Gradient penalty
+                eps = torch.rand(bs).cuda().view(bs, 1, 1, 1)
+                o_hat = eps * real_o + (1 - eps) * fake_o
+                o_next_hat = eps * real_o_next + (1 - eps) * fake_o_next
+                critic_hat = self.D(o_hat, o_next_hat)
+                grads = autograd.grad(critic_hat, torch.cat([o_hat, o_next_hat], dim=1),
+                                      torch.ones_like(critic_hat), retain_graph=True,
+                                      create_graph=True, only_inputs=True)[0]
+                grads = grads.view(grads.size(0), -1)
+                grad_norms = torch.sqrt((grads ** 2).sum(-1))
+                grad_penalty = lambda_ * (grad_norms - 1) ** 2
+                grad_penalty = grad_penalty.mean()
+
+                (D_loss + grad_penalty).backward()
                 optimD.step()
+
+                if num_iters % 5 != 0:
+                    continue
                 ############################################
                 # G loss (Update G)
                 optimG.zero_grad()
 
-                probs_fake_2 = self.D(fake_o, fake_o_next)
-                label.data.fill_(1)
-                G_loss = criterionD(probs_fake_2, label)
+                critic_fake_2 = self.D(fake_o, fake_o_next)
+                G_loss = -critic_fake_2.mean()
 
                 # Q loss (Update G, T, Q)
                 ent_loss = -self.P.log_prob(c).mean(0)
@@ -306,15 +318,16 @@ class Trainer:
                     self.log_dict['Gloss'] = G_loss.item()
                     self.log_dict['Qloss'] = Q_loss.item()
                     self.log_dict['Tloss'] = T_loss.item()
+                    self.log_dict['Grad_Penalty'] = grad_penalty.item()
                     self.log_dict['mi_loss'] = mi_loss.item()
                     self.log_dict['mi_loss_next'] = mi_loss_next.item()
                     self.log_dict['ent_loss'] = ent_loss.item()
                     self.log_dict['ent_loss_next'] = ent_loss_next.item()
                     self.log_dict['crossent_loss'] = crossent_loss.item()
                     self.log_dict['crossent_loss_next'] = crossent_loss_next.item()
-                    self.log_dict['D(real)'] = probs_real.data.mean()
-                    self.log_dict['D(fake)_before'] = probs_fake.data.mean()
-                    self.log_dict['D(fake)_after'] = probs_fake_2.data.mean()
+                    self.log_dict['D(real)'] = critic_real.data.mean()
+                    self.log_dict['D(fake)_before'] = critic_fake.data.mean()
+                    self.log_dict['D(fake)_after'] = critic_fake_2.data.mean()
 
                     write_stats_from_var(self.log_dict, Q_c_given_x, 'Q_c_given_real_x_mu')
                     write_stats_from_var(self.log_dict, Q_c_given_x, 'Q_c_given_real_x_mu', idx=0)
@@ -350,8 +363,8 @@ class Trainer:
                              T_loss.item(),
                              ent_loss.item(), ent_loss_next.item(),
                              crossent_loss.item(), crossent_loss_next.item(),
-                             probs_real.data.mean(),
-                             probs_fake.data.mean(), probs_fake_2.data.mean(),
+                             critic_real.data.mean(),
+                             critic_fake.data.mean(), critic_fake_2.data.mean(),
                              Q_c_given_x[:, 0].cpu().numpy().mean(),
                              Q_c_given_x[:, 0].cpu().numpy().std(),
                              np.sqrt(Q_c_given_x_var[:, 0].cpu().numpy().mean()),
