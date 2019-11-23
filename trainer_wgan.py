@@ -121,7 +121,7 @@ class Trainer:
         return discretize(state, self.discretization_bins, self.P.unif_range)
 
     def discriminator_function(self, obs, obs_next):
-        out = self.classifier(obs, obs_next)
+        out = self.classifier(torch.cat([obs, obs_next], dim=1))
         return out.detach().cpu().numpy()
 
     def discriminator_function_np(self, obs, obs_next):
@@ -492,7 +492,7 @@ class Trainer:
                 z_start, c_start, _, est_start_obs = torch.load(pt_start)
             else:
                 z_start, c_start, _, est_start_obs = self.closest_code(start_obs,
-                                                                       400,
+                                                                       256,
                                                                        False,
                                                                        metric, 1)
                 torch.save([z_start, c_start, _, est_start_obs], pt_start)
@@ -515,7 +515,7 @@ class Trainer:
             else:
 
                 z_goal, _, c_goal, est_goal_obs = self.closest_code(goal_obs,
-                                                                    400,
+                                                                    256,
                                                                     True,
                                                                     metric, 1)
                 torch.save([z_goal, _, c_goal, est_goal_obs], pt_goal)
@@ -686,7 +686,7 @@ class Trainer:
         if metric == 'L2':
             f = lambda x, y: ((x - y) ** 2).view(n_trials, -1).sum(1)
         elif metric == 'classifier':
-            f = lambda x, y: - self.classifier(x, y).view(-1) + ((x - y) ** 2).view(n_trials, -1).sum(1) / 10
+            f = lambda x, y: - self.classifier(torch.cat([x, y], dim=1)).view(-1) + ((x - y) ** 2).view(n_trials, -1).sum(1) / 10
         else:
             assert metric == 'D'
             # turned max into min using minus.
