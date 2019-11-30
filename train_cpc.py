@@ -22,6 +22,7 @@ class Encoder(nn.Module):
     def __init__(self, z_dim, channel_dim):
         super().__init__()
 
+        self.z_dim = z_dim
         self.model = nn.Sequential(
             nn.Conv2d(channel_dim, 64, 4, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
@@ -50,6 +51,7 @@ class Encoder(nn.Module):
 class Transition(nn.Module):
     def __init__(self, z_dim):
         super().__init__()
+        self.z_dim = z_dim
         self.out = nn.Linear(z_dim, z_dim, bias=False)
 
     def forward(self, x):
