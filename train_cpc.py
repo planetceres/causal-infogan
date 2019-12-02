@@ -101,7 +101,7 @@ def train_cpc(encoder, trans, optimizer, train_loader, neg_train_inf, epoch):
     pbar = tqdm(total=len(train_loader.dataset))
     for (obs, _), (obs_pos, _) in train_loader:
         obs, obs_pos = obs.cuda(), obs_pos.cuda() # b x 1 x 64 x 64
-        obs_neg = next(neg_train_inf).cuda() # n x 1 x 64 x 64
+        obs_neg = next(neg_train_inf)[0].cuda() # n x 1 x 64 x 64
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
         optimizer.zero_grad()
@@ -123,7 +123,7 @@ def test_cpc(encoder, trans, test_loader, neg_test_inf, epoch):
     test_loss = 0
     for (obs, _), (obs_pos, _) in test_loader:
         obs, obs_pos = obs.cuda(), obs_pos.cuda()  # b x 1 x 64 x 64
-        obs_neg = next(neg_test_inf).cuda()  # n x 1 x 64 x 64
+        obs_neg = next(neg_test_inf)[0].cuda()  # n x 1 x 64 x 64
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
         test_loss += loss.item() * obs.shape[0]
@@ -250,6 +250,13 @@ def main():
     imgs = next(iter(neg_train_loader))[0][:64]
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_img.png'), nrow=8)
 
+    (obs, _), (obs_next, _) = next(iter(train_loader))
+    imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs_dim)
+    save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_seq_img.png'), nrow=8)
+
+    imgs = next(neg_train_inf)[0]
+    save_image(imgs * 0.5 + 0.5, join(folder_name, 'neg.png'), nrow=10)
+
     for epoch in range(args.epochs):
         train_cpc(encoder, trans, optim_cpc, train_loader, neg_train_inf, epoch)
         test_cpc(encoder, trans, test_loader, neg_test_inf, epoch)
@@ -258,7 +265,7 @@ def main():
             train_decoder(decoder, optim_dec, neg_train_loader, encoder, epoch)
             test_decoder(decoder, neg_test_loader, encoder, epoch)
 
-            save_recon(decoder, train_loader, test_loader, encoder, epoch, folder_name)
+            save_recon(decoder, neg_train_loader, neg_test_loader, encoder, epoch, folder_name)
             save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
@@ -266,14 +273,12 @@ def main():
             torch.save(trans, join(folder_name, 'decoder.pt'))
 
 
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', type=str, default='data/rope/train_data')
-    parser.add_argument('--test', type=str, default='data/rope/test_data')
-    parser.add_argument('--start', type=str, default='data/rope/seq_data/start')
-    parser.add_argument('--goal', type=str, default='data/rope/seq_data/goal')
+    parser.add_argument('--train', type=str, default='data/rope2/train_data')
+    parser.add_argument('--test', type=str, default='data/rope2/test_data')
+    parser.add_argument('--start', type=str, default='data/rope2/seq_data/start')
+    parser.add_argument('--goal', type=str, default='data/rope2/seq_data/goal')
     parser.add_argument('--n_interp', type=int, default=8)
 
     parser.add_argument('--batch_size', type=int, default=128)
@@ -281,8 +286,8 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--log_interval', type=int, default=1)
 
-    parser.add_argument('--n', type=int, default=5)
-    parser.add_argument('--z_dim', type=int, default=16)
+    parser.add_argument('--n', type=int, default=50)
+    parser.add_argument('--z_dim', type=int, default=8)
     parser.add_argument('--k', type=int, default=1)
 
     parser.add_argument('--seed', type=int, default=0)

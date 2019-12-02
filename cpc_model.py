@@ -49,7 +49,7 @@ class Decoder(nn.Module):
         self.channel_dim = channel_dim
 
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(self.latent_dim, 512, 4, 1, bias=False),
+            nn.ConvTranspose2d(self.z_dim, 512, 4, 1, bias=False),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, True),
             nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
