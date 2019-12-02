@@ -13,64 +13,8 @@ import torch.utils.data as data
 
 from torchvision import transforms, utils, datasets
 
-class Encoder(nn.Module):
-    def __init__(self, z_dim, channel_dim):
-        super().__init__()
-
-        self.z_dim = z_dim
-        self.model = nn.Sequential(
-            nn.Conv2d(channel_dim, 64, 4, 2, 1),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 64 x 32 x 32
-            nn.Conv2d(64, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 128 x 16 x 16
-            nn.Conv2d(128, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2, inplace=True),
-            # Option 1: 256 x 8 x 8
-            nn.Conv2d(256, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2, inplace=True),
-            # 256 x 4 x 4
-        )
-        self.out = nn.Linear(256 * 4 * 4, z_dim)
-
-    def forward(self, x):
-        x = self.model(x)
-        x = x.view(x.shape[0], -1)
-        return self.out(x)
-
-
-class Decoder(nn.Module):
-
-    def __init__(self, z_dim, channel_dim):
-        super().__init__()
-        self.z_dim = z_dim
-        self.channel_dim = channel_dim
-
-        self.main = nn.Sequential(
-            nn.ConvTranspose2d(self.z_dim, 512, 4, 1, bias=False),
-            nn.BatchNorm2d(512),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(64, channel_dim, 4, 2, 1, bias=False),
-            nn.Tanh(),
-        )
-
-    def forward(self, z):
-        x = z.view(-1, self.z_dim, 1, 1)
-        output = self.main(x)
-        return output
+from cpc_model import Decoder
+from model import FCN_mse
 
 
 def get_data():
@@ -84,26 +28,34 @@ def get_data():
         x = x[None, :, :]
         return torch.from_numpy(x)
 
-    transform = transforms.Compose([
-        transforms.Resize(64),
-        transforms.CenterCrop(64),
-        transforms.ToTensor(),
-        filter_background,
-        lambda x: x.mean(dim=0)[None, :, :],
-        dilate,
-        transforms.Normalize((0.5,), (0.5,)),
-    ])
 
-    train_dset = datasets.ImageFolder(args.train, transform=transform)
+    if args.thanard_dset:
+        transform = transforms.Compose([
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+            filter_background,
+            lambda x: x.mean(dim=0)[None, :, :],
+            dilate,
+            transforms.Normalize((0.5,), (0.5,)),
+        ])
+
+    train_dset = datasets.ImageFolder(join(args.root, 'train_data'), transform=transform)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True,
                                   pin_memory=True, num_workers=2)
 
-    test_dset = datasets.ImageFolder(args.test, transform=transform)
+    test_dset = datasets.ImageFolder(join(args.root, 'test_data'), transform=transform)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True,
                                   pin_memory=True, num_workers=2)
 
-    start_dset = datasets.ImageFolder(args.start, transform=transform)
-    goal_dset = datasets.ImageFolder(args.goal, transform=transform)
+    start_dset = datasets.ImageFolder(join(args.root, 'seq_data', 'start'), transform=transform)
+    goal_dset = datasets.ImageFolder(join(args.root, 'seq_data', 'goal'), transform=transform)
 
     start_images = torch.stack([start_dset[i][0] for i in range(len(start_dset))], dim=0)
     goal_images = torch.stack([goal_dset[i][0] for i in range(len(goal_dset))], dim=0)
@@ -112,13 +64,18 @@ def get_data():
     return train_loader, test_loader, start_images, goal_images
 
 
+def apply_fcn_mse(img):
+    o = fcn(img.cuda()).detach()
+    return torch.clamp(2 * (o - 0.5), -1 + 1e-3, 1 - 1e-3)
+
+
 def train(model, optimizer, train_loader, encoder, epoch):
     model.train()
 
     train_losses = []
     pbar = tqdm(total=len(train_loader.dataset))
     for x, _ in train_loader:
-        x = x.cuda()
+        x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
         z = encoder(x).detach()
         recon = model(z)
         loss = F.mse_loss(recon, x)
@@ -140,7 +97,7 @@ def test(model, test_loader, encoder, epoch):
 
     test_loss = 0
     for x, _ in test_loader:
-        x = x.cuda()
+        x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
         z = encoder(x).detach()
         recon = model(z)
         loss = F.mse_loss(recon, x)
@@ -154,7 +111,11 @@ def save_recon(model, train_loader, test_loader, encoder, epoch, folder_name):
 
     train_batch = next(iter(train_loader))[0][:16]
     test_batch = next(iter(test_loader))[0][:16]
-    train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
+
+    if args.thanard_dset:
+        train_batch, test_batch = apply_fcn_mse(train_batch), apply_fcn_mse(test_batch)
+    else:
+        train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
 
     with torch.no_grad():
         train_z, test_z = encoder(train_batch), encoder(test_batch)
@@ -211,13 +172,16 @@ def main():
     assert exists(folder_name)
 
     train_loader, test_loader, start_images, goal_images = get_data()
-    start_images, goal_images = start_images.cuda(), goal_images.cuda()
-
-    model = Decoder(args.z_dim, 1).cuda()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    if args.thanard_dset:
+        start_images, goal_images = apply_fcn_mse(start_images), apply_fcn_mse(goal_images)
+    else:
+        start_images, goal_images = start_images.cuda(), goal_images.cuda()
 
     encoder = torch.load(join(folder_name, 'encoder.pt'), map_location='cuda')
     encoder.eval()
+
+    model = Decoder(encoder.z_dim, 1).cuda()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     for epoch in range(args.epochs):
         train(model, optimizer, train_loader, encoder, epoch)
@@ -231,13 +195,9 @@ def main():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', type=str, default='data/rope/train_data')
-    parser.add_argument('--test', type=str, default='data/rope/test_data')
-    parser.add_argument('--start', type=str, default='data/rope/seq_data/start')
-    parser.add_argument('--goal', type=str, default='data/rope/seq_data/goal')
-    parser.add_argument('--n_interp', type=int, default=6)
-
-    parser.add_argument('--z_dim', type=int, default=16)
+    parser.add_argument('--root', type=str, default='data/rope')
+    parser.add_argument('--n_interp', type=int, default=8)
+    parser.add_argument('--thanard_dset', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
@@ -247,4 +207,10 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='recon')
     args = parser.parse_args()
+
+    if args.thanard_dset:
+        fcn = FCN_mse(2).cuda()
+        fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
+        fcn.eval()
+
     main()
