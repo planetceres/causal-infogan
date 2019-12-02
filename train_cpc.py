@@ -16,12 +16,18 @@ from torchvision.datasets import ImageFolder
 
 from dataset import ImagePairs
 from cpc_model import Encoder, Decoder, Transition
+from model import FCN_mse
 
 
 def infinite_loader(data_loader):
     while True:
         for batch in data_loader:
             yield batch
+
+
+def apply_fcn_mse(img):
+    o = fcn(img.cuda()).detach()
+    return torch.clamp(2 * (o - 0.5), -1 + 1e-3, 1 - 1e-3)
 
 
 def get_dataloaders():
@@ -39,10 +45,10 @@ def get_dataloaders():
         transforms.Resize(64),
         transforms.CenterCrop(64),
         transforms.ToTensor(),
-        filter_background,
-        lambda x: x.mean(dim=0)[None, :, :],
-        dilate,
-        transforms.Normalize((0.5,), (0.5,)),
+        # filter_background,
+        # lambda x: x.mean(dim=0)[None, :, :],
+        # dilate,
+        # transforms.Normalize((0.5,), (0.5,)),
     ])
 
     train_dset = ImagePairs(root=args.train, transform=transform, n_frames_apart=args.k)
@@ -100,8 +106,10 @@ def train_cpc(encoder, trans, optimizer, train_loader, neg_train_inf, epoch):
     train_losses = []
     pbar = tqdm(total=len(train_loader.dataset))
     for (obs, _), (obs_pos, _) in train_loader:
-        obs, obs_pos = obs.cuda(), obs_pos.cuda() # b x 1 x 64 x 64
-        obs_neg = next(neg_train_inf)[0].cuda() # n x 1 x 64 x 64
+        # obs, obs_pos = obs, obs_pos.cuda() # b x 1 x 64 x 64
+        # obs_neg = next(neg_train_inf)[0].cuda() # n x 1 x 64 x 64
+        obs, obs_pos = apply_fcn_mse(obs), apply_fcn_mse(obs_pos)
+        obs_neg = apply_fcn_mse(next(neg_train_inf)[0])
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
         optimizer.zero_grad()
@@ -122,8 +130,10 @@ def test_cpc(encoder, trans, test_loader, neg_test_inf, epoch):
 
     test_loss = 0
     for (obs, _), (obs_pos, _) in test_loader:
-        obs, obs_pos = obs.cuda(), obs_pos.cuda()  # b x 1 x 64 x 64
-        obs_neg = next(neg_test_inf)[0].cuda()  # n x 1 x 64 x 64
+        # obs, obs_pos = obs.cuda(), obs_pos.cuda()  # b x 1 x 64 x 64
+        # obs_neg = next(neg_test_inf)[0].cuda()  # n x 1 x 64 x 64
+        obs, obs_pos = apply_fcn_mse(obs), apply_fcn_mse(obs_pos)
+        obs_neg = apply_fcn_mse(next(neg_test_inf)[0])
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
         test_loss += loss.item() * obs.shape[0]
@@ -138,7 +148,9 @@ def train_decoder(decoder, optimizer, train_loader, encoder, epoch):
     train_losses = []
     pbar = tqdm(total=len(train_loader.dataset))
     for x, _ in train_loader:
-        x = x.cuda()
+        # x = x.cuda()
+        x = apply_fcn_mse(x)
+
         z = encoder(x).detach()
         recon = decoder(z)
         loss = F.mse_loss(recon, x)
@@ -161,7 +173,9 @@ def test_decoder(decoder, test_loader, encoder, epoch):
 
     test_loss = 0
     for x, _ in test_loader:
-        x = x.cuda()
+        # x = x.cuda()
+        x = apply_fcn_mse(x)
+
         z = encoder(x).detach()
         recon = decoder(z)
         loss = F.mse_loss(recon, x)
@@ -176,7 +190,8 @@ def save_recon(decoder, train_loader, test_loader, encoder, epoch, folder_name):
 
     train_batch = next(iter(train_loader))[0][:16]
     test_batch = next(iter(test_loader))[0][:16]
-    train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
+    # train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
+    train_batch, test_batch = apply_fcn_mse(train_batch), apply_fcn_mse(test_batch)
 
     with torch.no_grad():
         train_z, test_z = encoder(train_batch), encoder(test_batch)
@@ -244,17 +259,21 @@ def main():
     optim_dec = optim.Adam(decoder.parameters(), lr=args.lr)
 
     train_loader, test_loader, neg_train_loader, neg_test_loader, neg_train_inf, neg_test_inf, start_images, goal_images = get_dataloaders()
-    start_images, goal_images = start_images.cuda(), goal_images.cuda()
+    # start_images, goal_images = start_images.cuda(), goal_images.cuda()
+    start_images, goal_images = apply_fcn_mse(start_images), apply_fcn_mse(goal_images)
 
     # Save training images
     imgs = next(iter(neg_train_loader))[0][:64]
+    imgs = apply_fcn_mse(imgs).cpu()
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_img.png'), nrow=8)
 
     (obs, _), (obs_next, _) = next(iter(train_loader))
     imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs_dim)
+    imgs = apply_fcn_mse(imgs).cpu()
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_seq_img.png'), nrow=8)
 
     imgs = next(neg_train_inf)[0]
+    imgs = apply_fcn_mse(imgs).cpu()
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'neg.png'), nrow=10)
 
     for epoch in range(args.epochs):
@@ -293,4 +312,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='cpc')
     args = parser.parse_args()
+
+    fcn = FCN_mse(2).cuda()
+    fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
+    fcn.eval()
+
     main()
