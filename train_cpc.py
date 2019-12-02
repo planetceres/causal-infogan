@@ -58,27 +58,27 @@ def get_dataloaders():
             transforms.Normalize((0.5,), (0.5,)),
         ])
 
-    train_dset = ImagePairs(root=args.train, transform=transform, n_frames_apart=args.k)
+    train_dset = ImagePairs(root=join(args.root, 'train_data'), transform=transform, n_frames_apart=args.k)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
-    test_dset = ImagePairs(root=args.test, transform=transform, n_frames_apart=args.k)
+    test_dset = ImagePairs(root=join(args.root, 'test_data'), transform=transform, n_frames_apart=args.k)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
-    neg_train_dset = ImageFolder(args.train, transform=transform)
+    neg_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
     neg_train_loader = data.DataLoader(neg_train_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2) # for training decoder
     neg_train_inf = infinite_loader(data.DataLoader(neg_train_dset, batch_size=args.n, shuffle=True,
                                                     pin_memory=True, num_workers=2)) # to get negative samples
 
-    neg_test_dset = ImageFolder(args.train, transform=transform)
+    neg_test_dset = ImageFolder(join(args.root, 'test_data'), transform=transform)
     neg_test_loader = data.DataLoader(neg_test_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2)
     neg_test_inf = infinite_loader(data.DataLoader(neg_test_dset, batch_size=args.n, shuffle=True,
                                                    pin_memory=True, num_workers=2))
 
 
-    start_dset = ImageFolder(args.start, transform=transform)
-    goal_dset = ImageFolder(args.goal, transform=transform)
+    start_dset = ImageFolder(join(args.root, 'seq_data', 'start'), transform=transform)
+    goal_dset = ImageFolder(join(args.root, 'seq_data', 'goal'), transform=transform)
 
     start_images = torch.stack([start_dset[i][0] for i in range(len(start_dset))], dim=0)
     goal_images = torch.stack([goal_dset[i][0] for i in range(len(goal_dset))], dim=0)
@@ -304,10 +304,7 @@ def main():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', type=str, default='data/rope2/train_data')
-    parser.add_argument('--test', type=str, default='data/rope2/test_data')
-    parser.add_argument('--start', type=str, default='data/rope2/seq_data/start')
-    parser.add_argument('--goal', type=str, default='data/rope2/seq_data/goal')
+    parser.add_argument('--root', type=str, default='data/rope2')
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--thanard_dset', action='store_true')
 
