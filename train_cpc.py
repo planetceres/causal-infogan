@@ -207,22 +207,17 @@ def save_recon(decoder, train_loader, test_loader, encoder, epoch, folder_name):
         os.makedirs(folder_name)
 
     filename = join(folder_name, 'recon_epoch{}.png'.format(epoch))
-    save_image(imgs, filename, nrow=8)
+    save_image(imgs * 0.5 + 0.5, filename, nrow=8)
 
 
 def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name):
     decoder.eval()
     encoder.eval()
 
-    z_start = encoder(start_images)  # n x z_dim
-    z_goal = encoder(goal_images)  # n x z_dim
+    n = min(start_images.shape[0], goal_images.shape[0])
 
-    start_size, goal_size = z_start.shape[0], z_goal.shape[0]
-
-    z_start = z_start.repeat(goal_size, 1)
-    z_start = z_start.view(start_size, goal_size, -1).permute(1, 0, 2)
-    z_start = z_start.contiguous().view(-1, args.z_dim)
-    z_goal = z_goal.repeat(start_size, 1)
+    z_start = encoder(start_images[:n])
+    z_goal = encoder(goal_images)[:n]
 
     lambdas = np.linspace(0, 1, args.n_interp + 2)
     zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
@@ -237,7 +232,7 @@ def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folde
         os.makedirs(folder_name)
 
     filename = join(folder_name, 'interp_epoch{}.png'.format(epoch))
-    save_image(imgs, filename, nrow=args.n_interp + 2)
+    save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 2)
 
 
 def main():
@@ -268,7 +263,7 @@ def main():
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_img.png'), nrow=8)
 
     (obs, _), (obs_next, _) = next(iter(train_loader))
-    imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs_dim)
+    imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs.shape[1:])
     imgs = apply_fcn_mse(imgs).cpu()
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_seq_img.png'), nrow=8)
 

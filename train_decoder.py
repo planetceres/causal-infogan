@@ -170,7 +170,7 @@ def save_recon(model, train_loader, test_loader, encoder, epoch, folder_name):
         os.makedirs(folder_name)
 
     filename = join(folder_name, 'recon_epoch{}.png'.format(epoch))
-    utils.save_image(imgs, filename, nrow=8)
+    utils.save_image(imgs * 0.5 + 0.5, filename, nrow=8)
 
 
 def save_interpolation(model, start_images, goal_images, encoder, epoch, folder_name):
@@ -199,7 +199,7 @@ def save_interpolation(model, start_images, goal_images, encoder, epoch, folder_
         os.makedirs(folder_name)
 
     filename = join(folder_name, 'interp_epoch{}.png'.format(epoch))
-    utils.save_image(imgs, filename, nrow=args.n_interp + 2)
+    utils.save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 2)
 
 
 def main():
