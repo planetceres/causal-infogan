@@ -13,6 +13,35 @@ import torch.utils.data as data
 
 from torchvision import transforms, utils, datasets
 
+class Encoder(nn.Module):
+    def __init__(self, z_dim, channel_dim):
+        super().__init__()
+
+        self.z_dim = z_dim
+        self.model = nn.Sequential(
+            nn.Conv2d(channel_dim, 64, 4, 2, 1),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 64 x 32 x 32
+            nn.Conv2d(64, 128, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 128 x 16 x 16
+            nn.Conv2d(128, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            # Option 1: 256 x 8 x 8
+            nn.Conv2d(256, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            # 256 x 4 x 4
+        )
+        self.out = nn.Linear(256 * 4 * 4, z_dim)
+
+    def forward(self, x):
+        x = self.model(x)
+        x = x.view(x.shape[0], -1)
+        return self.out(x)
+
 
 class Decoder(nn.Module):
 
@@ -22,7 +51,7 @@ class Decoder(nn.Module):
         self.channel_dim = channel_dim
 
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(self.latent_dim, 512, 4, 1, bias=False),
+            nn.ConvTranspose2d(self.z_dim, 512, 4, 1, bias=False),
             nn.BatchNorm2d(512),
             nn.ReLU(True),
             nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
@@ -76,8 +105,8 @@ def get_data():
     start_dset = datasets.ImageFolder(args.start, transform=transform)
     goal_dset = datasets.ImageFolder(args.goal, transform=transform)
 
-    start_images = torch.stack([start_dset[i] for i in range(len(start_dset))], dim=0)
-    goal_images = torch.stack([goal_dset[i] for i in range(len(goal_dset))], dim=0)
+    start_images = torch.stack([start_dset[i][0] for i in range(len(start_dset))], dim=0)
+    goal_images = torch.stack([goal_dset[i][0] for i in range(len(goal_dset))], dim=0)
 
 
     return train_loader, test_loader, start_images, goal_images
@@ -102,7 +131,7 @@ def train(model, optimizer, train_loader, encoder, epoch):
         avg_loss = np.mean(train_losses[-50:])
 
         pbar.set_description('Epoch {}, Train Loss {:.4f}'.format(epoch, avg_loss))
-        pbar.update(1)
+        pbar.update(x.shape[0])
     pbar.close()
 
 
@@ -112,7 +141,7 @@ def test(model, test_loader, encoder, epoch):
     test_loss = 0
     for x, _ in test_loader:
         x = x.cuda()
-        z = encoder(x).detacH()
+        z = encoder(x).detach()
         recon = model(z)
         loss = F.mse_loss(recon, x)
         test_loss += loss.item() * x.shape[0]
@@ -125,6 +154,7 @@ def save_recon(model, train_loader, test_loader, encoder, epoch, folder_name):
 
     train_batch = next(iter(train_loader))[0][:16]
     test_batch = next(iter(test_loader))[0][:16]
+    train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
 
     with torch.no_grad():
         train_z, test_z = encoder(train_batch), encoder(test_batch)
@@ -133,7 +163,7 @@ def save_recon(model, train_loader, test_loader, encoder, epoch, folder_name):
     real_imgs = torch.cat((train_batch, test_batch), dim=0)
     recon_imgs = torch.cat((train_recon, test_recon), dim=0)
     imgs = torch.stack((real_imgs, recon_imgs), dim=1)
-    imgs = imgs.view(-1, *real_imgs.shape[1:])
+    imgs = imgs.view(-1, *real_imgs.shape[1:]).cpu()
 
     folder_name = join(folder_name, 'reconstructions')
     if not exists(folder_name):
@@ -162,7 +192,7 @@ def save_interpolation(model, start_images, goal_images, encoder, epoch, folder_
     zs = zs.view(-1, args.z_dim)  # n * (n_interp+2) x z_dim
 
     with torch.no_grad():
-        imgs = model(zs)
+        imgs = model(zs).cpu()
 
     folder_name = join(folder_name, 'interpolations')
     if not exists(folder_name):
@@ -181,6 +211,7 @@ def main():
     assert exists(folder_name)
 
     train_loader, test_loader, start_images, goal_images = get_data()
+    start_images, goal_images = start_images.cuda(), goal_images.cuda()
 
     model = Decoder(args.z_dim, 1).cuda()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
