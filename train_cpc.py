@@ -207,6 +207,8 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
         z = encoder(batch) # 10 x z_dim
         zz = (z ** 2).sum(-1).unsqueeze(1) # z^Tz, 10 x 1
 
+        pbar = tqdm(total=len(train_loader.dataset) + len(test_loader.dataset))
+        pbar.set_description('Computing NN')
         dists = []
         for loader in [train_loader, test_loader]:
             for x, _ in loader:
@@ -216,9 +218,12 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
                 zxzx = (zx ** 2).sum(-1).unsqueeze(0) #zx^Tzx, 1 x b
                 dist = zz - 2 * zzx + zxzx # norm squared distance, 10 x b
                 dists.append(dist.cpu())
+                pbar.update(x.shape[0])
         dists = torch.cat(dists, dim=1) # 10 x dset_size
         topk = torch.topk(dists, k + 1, dim=1, largest=False)[1]
         topk = topk[:, 1:] # closest is always trivially the same image
+
+        pbar.close()
 
     folder_name = join(folder_name, 'nn_epoch{}'.format(epoch))
     if not exists(folder_name):
