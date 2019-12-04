@@ -195,7 +195,7 @@ def test_decoder(decoder, test_loader, encoder, epoch):
 
 
 def save_nearest_neighbors(encoder, train_loader, test_loader,
-                           epoch, folder_name, k=99):
+                           epoch, folder_name, k=100):
     encoder.eval()
 
     train_batch = next(iter(train_loader))[0][:5]
@@ -212,7 +212,7 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
         dists = []
         for loader in [train_loader, test_loader]:
             for x, _ in loader:
-                x = x.cuda()
+                x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
                 zx = encoder(x) # b x z_dim
                 zzx = torch.matmul(z, zx.t()) # z_1^Tz_2, 10 x b
                 zxzx = (zx ** 2).sum(-1).unsqueeze(0) #zx^Tzx, 1 x b
@@ -221,7 +221,6 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
                 pbar.update(x.shape[0])
         dists = torch.cat(dists, dim=1) # 10 x dset_size
         topk = torch.topk(dists, k + 1, dim=1, largest=False)[1]
-        topk = topk[:, 1:] # closest is always trivially the same image
 
         pbar.close()
 
@@ -231,7 +230,6 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
 
     train_size = len(train_loader.dataset)
     for i in range(10):
-        imgs = [batch[i].cpu()]
         for idx in topk[i]:
             if idx >= train_size:
                 imgs.append(test_loader.dataset[idx - train_size][0])
@@ -364,7 +362,7 @@ def main():
             save_recon(decoder, neg_train_loader, neg_test_loader, encoder, epoch, folder_name)
             save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name)
             save_run_dynamics(decoder, encoder, trans, start_images, epoch, folder_name)
-            save_nearest_neighbors(encoder, train_loader, test_loader, epoch, folder_name, k=99)
+            save_nearest_neighbors(encoder, neg_train_loader, neg_test_loader, epoch, folder_name, k=99)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
