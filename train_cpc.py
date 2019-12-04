@@ -230,6 +230,7 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
 
     train_size = len(train_loader.dataset)
     for i in range(10):
+        imgs = []
         for idx in topk[i]:
             if idx >= train_size:
                 imgs.append(test_loader.dataset[idx - train_size][0])
@@ -362,7 +363,7 @@ def main():
             save_recon(decoder, neg_train_loader, neg_test_loader, encoder, epoch, folder_name)
             save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name)
             save_run_dynamics(decoder, encoder, trans, start_images, epoch, folder_name)
-            save_nearest_neighbors(encoder, neg_train_loader, neg_test_loader, epoch, folder_name, k=99)
+            save_nearest_neighbors(encoder, neg_train_loader, neg_test_loader, epoch, folder_name)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
