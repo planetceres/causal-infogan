@@ -83,6 +83,8 @@ def get_dataloaders():
     start_images = torch.stack([start_dset[i][0] for i in range(len(start_dset))], dim=0)
     goal_images = torch.stack([goal_dset[i][0] for i in range(len(goal_dset))], dim=0)
 
+    n = min(start_images.shape[0], goal_images.shape[0])
+    start_images, goal_images = start_images[:n], goal_images[:n]
 
     return train_loader, test_loader, neg_train_loader, neg_test_loader, neg_train_inf, neg_test_inf, start_images, goal_images
 
@@ -117,7 +119,7 @@ def train_cpc(encoder, trans, optimizer, train_loader, neg_train_inf, epoch):
             obs, obs_pos = apply_fcn_mse(obs), apply_fcn_mse(obs_pos)
             obs_neg = apply_fcn_mse(next(neg_train_inf)[0])
         else:
-            obs, obs_pos = obs, obs_pos.cuda() # b x 1 x 64 x 64
+            obs, obs_pos = obs.cuda(), obs_pos.cuda() # b x 1 x 64 x 64
             obs_neg = next(neg_train_inf)[0].cuda() # n x 1 x 64 x 64
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
@@ -224,10 +226,8 @@ def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folde
     decoder.eval()
     encoder.eval()
 
-    n = min(start_images.shape[0], goal_images.shape[0])
-
-    z_start = encoder(start_images[:n])
-    z_goal = encoder(goal_images)[:n]
+    z_start = encoder(start_images)
+    z_goal = encoder(goal_images)
 
     lambdas = np.linspace(0, 1, args.n_interp + 2)
     zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal

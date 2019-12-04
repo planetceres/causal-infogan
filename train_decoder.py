@@ -60,6 +60,8 @@ def get_data():
     start_images = torch.stack([start_dset[i][0] for i in range(len(start_dset))], dim=0)
     goal_images = torch.stack([goal_dset[i][0] for i in range(len(goal_dset))], dim=0)
 
+    n = min(start_images.shape[0], goal_images.shape[0])
+    start_images, goal_images = start_images[:n], goal_images[:n]
 
     return train_loader, test_loader, start_images, goal_images
 
@@ -140,17 +142,10 @@ def save_interpolation(model, start_images, goal_images, encoder, epoch, folder_
     z_start = encoder(start_images)  # n x z_dim
     z_goal = encoder(goal_images)  # n x z_dim
 
-    start_size, goal_size = z_start.shape[0], z_goal.shape[0]
-
-    z_start = z_start.repeat(goal_size, 1)
-    z_start = z_start.view(start_size, goal_size, -1).permute(1, 0, 2)
-    z_start = z_start.contiguous().view(-1, args.z_dim)
-    z_goal = z_goal.repeat(start_size, 1)
-
     lambdas = np.linspace(0, 1, args.n_interp + 2)
     zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
                       for lambda_ in lambdas], dim=1)  # n x n_interp+2 x z_dim
-    zs = zs.view(-1, args.z_dim)  # n * (n_interp+2) x z_dim
+    zs = zs.view(-1, encoder.z_dim)  # n * (n_interp+2) x z_dim
 
     with torch.no_grad():
         imgs = model(zs).cpu()
@@ -182,6 +177,11 @@ def main():
 
     model = Decoder(encoder.z_dim, 1).cuda()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
+
+    imgs = next(iter(train_loader))[0]
+    if args.thanard_dset:
+        imgs = apply_fcn_mse(imgs).cpu()
+    utils.save_image(imgs * 0.5 + 0.5, join(folder_name, 'dec_train_img.png'))
 
     for epoch in range(args.epochs):
         train(model, optimizer, train_loader, encoder, epoch)
