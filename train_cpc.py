@@ -194,6 +194,48 @@ def test_decoder(decoder, test_loader, encoder, epoch):
     print('Dec Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss))
 
 
+def save_nearest_neighbors(encoder, train_loader, test_loader,
+                           epoch, folder_name, k=99):
+    encoder.eval()
+
+    train_batch = next(iter(train_loader))[0][:5]
+    test_batch = next(iter(test_loader))[0][:5]
+
+    with torch.no_grad():
+        batch = torch.cat((train_batch, test_batch), dim=0)
+        batch = apply_fcn_mse(batch) if args.thanard_dset else batch.cuda()
+        z = encoder(batch) # 10 x z_dim
+        zz = (z ** 2).sum(-1).unsqueeze(1) # z^Tz, 10 x 1
+
+        dists = []
+        for loader in [train_loader, test_loader]:
+            for x, _ in loader:
+                x = x.cuda()
+                zx = encoder(x) # b x z_dim
+                zzx = torch.matmul(z, zx.t()) # z_1^Tz_2, 10 x b
+                zxzx = (zx ** 2).sum(-1).unsqueeze(0) #zx^Tzx, 1 x b
+                dist = zz - 2 * zzx + zxzx # norm squared distance, 10 x b
+                dists.append(dist.cpu())
+        dists = torch.cat(dists, dim=1) # 10 x dset_size
+        topk = torch.topk(dists, k + 1, dim=1, largest=False)[1]
+        topk = topk[:, 1:] # closest is always trivially the same image
+
+    folder_name = join(folder_name, 'nn_epoch{}'.format(epoch))
+    if not exists(folder_name):
+        os.makedirs(folder_name)
+
+    train_size = len(train_loader.dataset)
+    for i in range(10):
+        imgs = [batch[i].cpu()]
+        for idx in topk[i]:
+            if idx >= train_size:
+                imgs.append(test_loader.dataset[idx - train_size][0])
+            else:
+                imgs.append(train_loader.dataset[idx][0])
+        imgs = torch.stack(imgs, dim=0)
+        save_image(imgs * 0.5 + 0.5, join(folder_name, 'nn_{}.png'.format(i)), nrow=10)
+
+
 def save_recon(decoder, train_loader, test_loader, encoder, epoch, folder_name):
     decoder.eval()
     encoder.eval()
@@ -226,15 +268,15 @@ def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folde
     decoder.eval()
     encoder.eval()
 
-    z_start = encoder(start_images)
-    z_goal = encoder(goal_images)
-
-    lambdas = np.linspace(0, 1, args.n_interp + 2)
-    zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
-                      for lambda_ in lambdas], dim=1)  # n x n_interp+2 x z_dim
-    zs = zs.view(-1, args.z_dim)  # n * (n_interp+2) x z_dim
-
     with torch.no_grad():
+        z_start = encoder(start_images)
+        z_goal = encoder(goal_images)
+
+        lambdas = np.linspace(0, 1, args.n_interp + 2)
+        zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
+                          for lambda_ in lambdas], dim=1)  # n x n_interp+2 x z_dim
+        zs = zs.view(-1, args.z_dim)  # n * (n_interp+2) x z_dim
+
         imgs = decoder(zs).cpu()
 
     folder_name = join(folder_name, 'interpolations')
@@ -243,6 +285,26 @@ def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folde
 
     filename = join(folder_name, 'interp_epoch{}.png'.format(epoch))
     save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 2)
+
+
+def save_run_dynamics(decoder, encoder, trans, start_images, epoch, folder_name):
+    decoder.eval()
+    encoder.eval()
+
+    with torch.no_grad():
+        zs = [encoder(start_images)]
+        for _ in range(args.n_interp):
+            zs.append(trans(zs[-1]))
+        zs = torch.stack(zs, dim=1)
+        zs = zs.view(-1, args.z_dim)
+        imgs = decoder(zs).cpu()
+
+    folder_name = join(folder_name, 'run_dynamics')
+    if not exists(folder_name):
+        os.makedirs(folder_name)
+
+    filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
+    save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 1)
 
 
 def main():
@@ -292,10 +354,12 @@ def main():
 
         if epoch % args.log_interval == 0:
             train_decoder(decoder, optim_dec, neg_train_loader, encoder, epoch)
-            test_decoder(decoder, neg_test_loader, encoder, epoch)
+            # test_decoder(decoder, neg_test_loader, encoder, epoch)
 
             save_recon(decoder, neg_train_loader, neg_test_loader, encoder, epoch, folder_name)
             save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name)
+            save_run_dynamics(decoder, encoder, trans, start_images, epoch, folder_name)
+            save_nearest_neighbors(encoder, train_loader, test_loader, epoch, folder_name, k=99)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
