@@ -4,6 +4,7 @@ from os.path import join, exists
 import numpy as np
 from scipy.ndimage.morphology import grey_dilation
 from tqdm import tqdm
+import glob
 
 import torch
 import torch.nn.functional as F
@@ -13,6 +14,7 @@ import torch.optim as optim
 from torchvision.utils import save_image
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
+from torchvision.datasets.folder import default_loader
 
 from dataset import ImagePairs
 from cpc_model import Encoder, Decoder, Transition
@@ -58,10 +60,12 @@ def get_dataloaders():
             transforms.Normalize((0.5,), (0.5,)),
         ])
 
-    train_dset = ImagePairs(root=join(args.root, 'train_data'), transform=transform, n_frames_apart=args.k)
+    train_dset = ImagePairs(root=join(args.root, 'train_data'), include_actions=args.include_actions,
+                            transform=transform, n_frames_apart=args.k)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
-    test_dset = ImagePairs(root=join(args.root, 'test_data'), transform=transform, n_frames_apart=args.k)
+    test_dset = ImagePairs(root=join(args.root, 'test_data'), include_actions=args.include_actions,
+                           transform=transform, n_frames_apart=args.k)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
     neg_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
@@ -89,11 +93,14 @@ def get_dataloaders():
     return train_loader, test_loader, neg_train_loader, neg_test_loader, neg_train_inf, neg_test_inf, start_images, goal_images
 
 
-def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans):
+def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=None):
+    assert (args.include_action and actions is not None) or (not args.include_actions and actions is None)
     bs = obs.shape[0]
 
     z, z_pos = encoder(obs), encoder(obs_pos)  # b x z_dim
     z_neg = encoder(obs_neg)  # n x z_dim
+
+    z = torch.cat((z, actions), dim=1) if args.include_actions else z
     z_next = trans(z)  # b x z_dim
 
     z_next = z_next.unsqueeze(1)  # b x 1 x z_dim
@@ -114,7 +121,14 @@ def train_cpc(encoder, trans, optimizer, train_loader, neg_train_inf, epoch):
 
     train_losses = []
     pbar = tqdm(total=len(train_loader.dataset))
-    for (obs, _), (obs_pos, _) in train_loader:
+    for batch in train_loader:
+        if args.include_actions:
+            (obs, _, actions), (obs_pos, _, _) = batch
+            actions = actions.cuda()
+        else:
+            (obs, _), (obs_pos, _) = batch
+            actions = None
+
         if args.thanard_dset:
             obs, obs_pos = apply_fcn_mse(obs), apply_fcn_mse(obs_pos)
             obs_neg = apply_fcn_mse(next(neg_train_inf)[0])
@@ -122,7 +136,7 @@ def train_cpc(encoder, trans, optimizer, train_loader, neg_train_inf, epoch):
             obs, obs_pos = obs.cuda(), obs_pos.cuda() # b x 1 x 64 x 64
             obs_neg = next(neg_train_inf)[0].cuda() # n x 1 x 64 x 64
 
-        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
+        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=actions)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -140,7 +154,14 @@ def test_cpc(encoder, trans, test_loader, neg_test_inf, epoch):
     trans.eval()
 
     test_loss = 0
-    for (obs, _), (obs_pos, _) in test_loader:
+    for batch in test_loader:
+        if args.include_actions:
+            (obs, _, actions), (obs_pos, _, _) = batch
+            actions = actions.cuda()
+        else:
+            (obs, _), (obs_pos, _) = batch
+            actions = None
+
         if args.thanard_dset:
             obs, obs_pos = apply_fcn_mse(obs), apply_fcn_mse(obs_pos)
             obs_neg = apply_fcn_mse(next(neg_test_inf)[0])
@@ -148,7 +169,7 @@ def test_cpc(encoder, trans, test_loader, neg_test_inf, epoch):
             obs, obs_pos = obs.cuda(), obs_pos.cuda()  # b x 1 x 64 x 64
             obs_neg = next(neg_test_inf)[0].cuda()  # n x 1 x 64 x 64
 
-        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans)
+        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=actions)
         test_loss += loss.item() * obs.shape[0]
     test_loss /= len(test_loader.dataset)
     print('CPC Epoch {}, Test Loss {:.4f}'.format(epoch, test_loss))
@@ -237,6 +258,8 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
             else:
                 imgs.append(train_loader.dataset[idx][0])
         imgs = torch.stack(imgs, dim=0)
+        if args.thanard_dset:
+            imgs = apply_fcn_mse(imgs).cpu()
         save_image(imgs * 0.5 + 0.5, join(folder_name, 'nn_{}.png'.format(i)), nrow=10)
 
 
@@ -291,24 +314,71 @@ def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folde
     save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 2)
 
 
-def save_run_dynamics(decoder, encoder, trans, start_images, epoch, folder_name):
+def save_run_dynamics(decoder, encoder, trans, start_images,
+                      train_loader, epoch, folder_name):
     decoder.eval()
     encoder.eval()
 
-    with torch.no_grad():
-        zs = [encoder(start_images)]
-        for _ in range(args.n_interp):
-            zs.append(trans(zs[-1]))
-        zs = torch.stack(zs, dim=1)
-        zs = zs.view(-1, args.z_dim)
-        imgs = decoder(zs).cpu()
+    if args.include_actions:
+        dset = train_loader.dataset
+        transform = dset.transform
+        with torch.no_grad():
+            actions, images = [], []
+            n_ep = 5
+            for i in range(n_ep):
+                class_name = [name for name, idx in dset.class_to_idx.item() if idx == i]
+                assert len(class_name) == 0
+                class_name = class_name[0]
 
-    folder_name = join(folder_name, 'run_dynamics')
-    if not exists(folder_name):
-        os.makedirs(folder_name)
+                a = np.load(join(args.root, 'train_data', class_name, 'actions.npy'))
+                a = torch.FloatTensor(a)
+                actions.append(a)
+                ext = 'jpg' if args.thanard_dset else 'png'
+                img_files = glob.glob(join(args.root, 'train_data', class_name, '*.{}'.format(ext)))
+                img_files = sorted(img_files)
+                image = torch.stack([transform(default_loader(f)) for f in img_files], dim=0)
+                images.append(image)
+            min_length = min(min([img.shape[0] for img in images]), 10)
+            actions = [a[:min_length] for a in actions]
+            images = [img[:min_length] for img in images]
+            actions, images = torch.stack(actions, dim=0), torch.stack(images, dim=0)
+            images = images.view(-1, *images.shape[2:])
+            images = apply_fcn_mse(images) if args.thanard_dset else images.cuda()
+            images = images.view(n_ep, min_length, *images.shape[1:])
+            actions = actions.cuda()
 
-    filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
-    save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 1)
+            zs = [encoder(images[:, 0])]
+            for i in range(min_length - 1):
+                zs.append(trans(torch.cat((zs[-1], actions[:, i]))))
+            zs = torch.stack(zs, dim=1)
+            zs = zs.view(-1, args.z_dim)
+            recon = decoder(zs)
+            recon = recon.view(n_ep, min_length, args.z_dim)
+
+            all_imgs = torch.stack((images, recon), dim=1)
+            all_imgs = all_imgs.view(-1, *all_imgs.shape[3:])
+
+            folder_name = join(folder_name, 'run_dynamics')
+            if not exists(folder_name):
+                os.makedirs(folder_name)
+
+            filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
+            save_image(all_imgs * 0.5 + 0.5, filename, nrow=min_length)
+    else:
+        with torch.no_grad():
+            zs = [encoder(start_images)]
+            for _ in range(args.n_interp):
+                zs.append(trans(zs[-1]))
+            zs = torch.stack(zs, dim=1)
+            zs = zs.view(-1, args.z_dim)
+            imgs = decoder(zs).cpu()
+
+        folder_name = join(folder_name, 'run_dynamics')
+        if not exists(folder_name):
+            os.makedirs(folder_name)
+
+        filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
+        save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 1)
 
 
 def main():
@@ -321,8 +391,10 @@ def main():
         os.makedirs(folder_name)
 
     obs_dim = (1, 64, 64)
+    action_dim = 5 if args.thanard_dset else 4
+
     encoder = Encoder(args.z_dim, obs_dim[0]).cuda()
-    trans = Transition(args.z_dim).cuda()
+    trans = Transition(args.z_dim, args.include_actions * action_dim).cuda()
     decoder = Decoder(args.z_dim, obs_dim[0]).cuda()
 
     optim_cpc = optim.Adam(list(encoder.parameters()) + list(trans.parameters()),
@@ -362,7 +434,7 @@ def main():
 
             save_recon(decoder, neg_train_loader, neg_test_loader, encoder, epoch, folder_name)
             save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name)
-            save_run_dynamics(decoder, encoder, trans, start_images, epoch, folder_name)
+            save_run_dynamics(decoder, encoder, trans, start_images, neg_train_loader, epoch, folder_name)
             save_nearest_neighbors(encoder, neg_train_loader, neg_test_loader, epoch, folder_name)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
@@ -375,6 +447,7 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=str, default='data/rope2')
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--thanard_dset', action='store_true')
+    parser.add_argument('--include_action', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)

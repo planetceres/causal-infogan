@@ -7,6 +7,7 @@ import os.path
 import gzip
 import errno
 from tqdm import tqdm
+from os.path import join, dirname, basename
 
 from torchvision.datasets.folder import is_image_file, default_loader, find_classes, \
     IMG_EXTENSIONS
@@ -104,56 +105,6 @@ def make_pair(imgs, resets, k, get_img, root):
     return image_pairs
 
 
-def make_cpc(imgs, resets, k, n, n_repeat, get_img, root):
-    """
-    Return a list of image pairs. The pair is picked if they are k steps apart,
-    and there is no reset from the first to the k-1 frames.
-    Cases:
-        If k = -1, we just randomly pick two images.
-        If k >= 0, we try to load img pairs that are k frames apart.
-    """
-    if k < 0:
-        return list(zip(imgs, np.random.permutation(imgs)))
-
-    filename = os.path.join(root, 'rope_cpc_k%d_n%d_nrepeat_%d.pkl' % (k, n, n_repeat))
-    if os.path.exists(filename):
-        with open(filename, 'rb') as f:
-            return pkl.load(f)
-
-    idxs = np.argwhere(resets).reshape(-1)
-    idxs = np.concatenate(([-1], idxs), axis=0)
-    episodes = []
-    for i in range(len(idxs) - 1):
-        episodes.append((idxs[i] + 1, idxs[i + 1] + 1))  # (inclusive, exclusive)
-    episodes = np.array(episodes)
-
-    image_pairs = []
-    pbar = tqdm(total=len(imgs))
-    for i, img in enumerate(imgs):
-        if np.sum(resets[i:i + k]) == 0 and (get_img(imgs[i + k][0]) - get_img(img[0])).abs().max() > 0.5:
-            # Get True next image
-            true_next_img = imgs[i + k]
-
-            # Get negative samples
-            ep_idxs = np.random.randint(0, len(episodes), size=n_repeat * (n - 1))
-            while ((episodes[ep_idxs, 0] <= i) & (i < episodes[ep_idxs, 1])).any():
-                ep_idxs = np.random.randint(0, len(episodes), size=n_repeat * (n - 1))
-            false_next_imgs = [np.random.randint(episodes[ep_idx][0], episodes[ep_idx][1]) for ep_idx in ep_idxs]
-            false_next_imgs = [imgs[next_img] for next_img in false_next_imgs]
-
-            labels = np.random.randint(low=0, high=n, size=n_repeat).tolist()
-            for i in range(n_repeat):
-                label = labels[i]
-                false_next_img = false_next_imgs[i * (n - 1):(i + 1) * (n - 1)]
-                image_pairs.append(([img] + false_next_img[:label] + [true_next_img] + false_next_img[label:], label))
-        pbar.update(1)
-    pbar.close()
-
-    with open(filename, 'wb') as f:
-        pkl.dump(image_pairs, f)
-    return image_pairs
-
-
 def make_negative_pairs(imgs, resets, root):
     """
     Return a list of negative image pairs. For each pair, the second image is picked
@@ -210,9 +161,10 @@ class ImagePairs(data.Dataset):
 
     url = 'https://drive.google.com/uc?export=download&confirm=ypZ7&id=10xovkLQ09BDvhtpD_nqXWFX-rlNzMVl9'
 
-    def __init__(self, root, transform=None, target_transform=None,
+    def __init__(self, root, include_actions=False, transform=None, target_transform=None,
                  loader=default_loader, n_frames_apart=1, download=False, include_neg=False):
         self.root = root
+        self.include_actions = include_actions
         if download:
             self.download()
 
@@ -294,7 +246,14 @@ class ImagePairs(data.Dataset):
                 img = self.transform(img)
             if self.target_transform is not None:
                 target = self.target_transform(target)
-            output.append((img, target))
+
+            if self.include_actions:
+                dir_name = dirname(path)
+                actions = np.load(join(dir_name, 'actions.npy'))
+                i = int(basename(path).split('.')[0].split('_')[1])
+                output.append((img, target, torch.FloatTensor(actions[i])))
+            else:
+                output.append((img, target))
         return output
 
     def __len__(self):
@@ -309,84 +268,3 @@ class ImagePairs(data.Dataset):
         tmp = '    Target Transforms (if any): '
         fmt_str += '{0}{1}'.format(tmp, self.target_transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
         return fmt_str
-
-class CPCDataset(data.Dataset):
-    """
-    A copy of ImageFolder from torchvision. Output image pairs that are k steps apart.
-
-    Args:
-        root (string): Root directory path.
-        transform (callable, optional): A function/transform that  takes in an PIL image
-            and returns a transformed version. E.g, ``transforms.RandomCrop``
-        target_transform (callable, optional): A function/transform that takes in the
-            target and transforms it.
-        loader (callable, optional): A function to load an image given its path.
-        n_frames_apart (int): The number of frames between the image pairs. Fixed for now.
-
-     Attributes:
-        classes (list): List of the class names.
-        class_to_idx (dict): Dict with items (class_name, class_index).
-        img_pairs (list): List of pairs of (image path, class_index) tuples
-    """
-
-    def __init__(self, root, transform=None, target_transform=None,
-                 loader=default_loader, n_frames_apart=1, n=5, n_repeat=5):
-        self.root = root
-
-        classes, class_to_idx = find_classes(root)
-        imgs, actions = make_dataset(root, class_to_idx)
-        if len(imgs) == 0:
-            raise (RuntimeError("Found 0 images in subfolders of: " + root + "\n"
-                                                                             "Supported image extensions are: " + ",".join(
-                IMG_EXTENSIONS)))
-        resets = 1. - actions[:, -1]
-        assert len(imgs) == len(resets)
-
-        self.classes = classes
-        self.class_to_idx = class_to_idx
-        self.transform = transform
-        self.target_transform = target_transform
-        self.loader = loader
-        img_pairs = make_cpc(imgs, resets, n_frames_apart, n, n_repeat, self._get_image, root)
-        self.img_pairs = img_pairs
-
-    def _get_image(self, path):
-        img = self.loader(path)
-        if self.transform is not None:
-            img = self.transform(img)
-        return img
-
-    def _check_exists(self):
-        return os.path.exists(self.processed_folder)
-
-    @property
-    def raw_folder(self):
-        return os.path.join(self.root, self.__class__.__name__, 'raw')
-
-    @property
-    def processed_folder(self):
-        return os.path.join(self.root, self.__class__.__name__, 'processed')
-
-    def __getitem__(self, index):
-        """
-        Args:
-            index (int): Index
-
-        Returns:
-            tuple: (image, target) where target is class_index of the target class.
-        """
-        paths, target = self.img_pairs[index]
-        if self.target_transform is not None:
-            target = self.target_transform(target)
-
-        images = []
-        for path in paths:
-            img = self.loader(path[0])
-            if self.transform is not None:
-                img = self.transform(img)
-            images.append(img)
-        images = torch.stack(images, dim=0)
-        return images, target
-
-    def __len__(self):
-        return len(self.img_pairs)

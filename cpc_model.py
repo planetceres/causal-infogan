@@ -32,10 +32,10 @@ class Encoder(nn.Module):
 
 
 class Transition(nn.Module):
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, action_dim=0):
         super().__init__()
         self.z_dim = z_dim
-        self.out = nn.Linear(z_dim, z_dim, bias=False)
+        self.out = nn.Linear(z_dim + action_dim, z_dim, bias=False)
 
     def forward(self, x):
         return self.out(x)
