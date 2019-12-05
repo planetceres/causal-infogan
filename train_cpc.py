@@ -61,11 +61,11 @@ def get_dataloaders():
         ])
 
     train_dset = ImagePairs(root=join(args.root, 'train_data'), include_actions=args.include_actions,
-                            transform=transform, n_frames_apart=args.k)
+                            thanard_dset=args.thanard_dset, transform=transform, n_frames_apart=args.k)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
     test_dset = ImagePairs(root=join(args.root, 'test_data'), include_actions=args.include_actions,
-                           transform=transform, n_frames_apart=args.k)
+                           thanard_dset=args.thanard_dset, transform=transform, n_frames_apart=args.k)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
     neg_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
@@ -94,7 +94,7 @@ def get_dataloaders():
 
 
 def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=None):
-    assert (args.include_action and actions is not None) or (not args.include_actions and actions is None)
+    assert (args.include_actions and actions is not None) or (not args.include_actions and actions is None)
     bs = obs.shape[0]
 
     z, z_pos = encoder(obs), encoder(obs_pos)  # b x z_dim
@@ -326,8 +326,8 @@ def save_run_dynamics(decoder, encoder, trans, start_images,
             actions, images = [], []
             n_ep = 5
             for i in range(n_ep):
-                class_name = [name for name, idx in dset.class_to_idx.item() if idx == i]
-                assert len(class_name) == 0
+                class_name = [name for name, idx in dset.class_to_idx.items() if idx == i]
+                assert len(class_name) == 1
                 class_name = class_name[0]
 
                 a = np.load(join(args.root, 'train_data', class_name, 'actions.npy'))
@@ -349,11 +349,11 @@ def save_run_dynamics(decoder, encoder, trans, start_images,
 
             zs = [encoder(images[:, 0])]
             for i in range(min_length - 1):
-                zs.append(trans(torch.cat((zs[-1], actions[:, i]))))
+                zs.append(trans(torch.cat((zs[-1], actions[:, i]), dim=1)))
             zs = torch.stack(zs, dim=1)
             zs = zs.view(-1, args.z_dim)
             recon = decoder(zs)
-            recon = recon.view(n_ep, min_length, args.z_dim)
+            recon = recon.view(n_ep, min_length, *images.shape[2:])
 
             all_imgs = torch.stack((images, recon), dim=1)
             all_imgs = all_imgs.view(-1, *all_imgs.shape[3:])
@@ -413,7 +413,11 @@ def main():
         imgs = apply_fcn_mse(imgs).cpu()
     save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_img.png'), nrow=8)
 
-    (obs, _), (obs_next, _) = next(iter(train_loader))
+    batch = next(iter(train_loader))
+    if args.include_actions:
+        (obs, _, _), (obs_next, _, _) = batch
+    else:
+        (obs, _), (obs_next, _) = batch
     imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs.shape[1:])
     if args.thanard_dset:
         imgs = apply_fcn_mse(imgs).cpu()
@@ -447,7 +451,7 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=str, default='data/rope2')
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--thanard_dset', action='store_true')
-    parser.add_argument('--include_action', action='store_true')
+    parser.add_argument('--include_actions', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
