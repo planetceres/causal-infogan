@@ -197,16 +197,18 @@ def save_run_dynamics(decoder, encoder, trans, start_images,
             inp = torch.cat((zs[-1], actions[:, i]), dim=1) if args.include_actions else zs[-1]
             zs.append(trans(inp))
         zs = torch.stack(zs, dim=1)
-        zs = zs.view(-1, args.z_dim)
+        zs = zs.view(-1, encoder.z_dim)
         recon = decoder(zs)
         recon = recon.view(n_ep, min_length, *images.shape[2:])
 
         images = images.view(-1, *images.shape[2:])
         zs_true = encoder(images)
         zs_true = zs_true.view(n_ep, min_length, encoder.z_dim)
+        zs = zs.view(n_ep, min_length, encoder.z_dim)
         images = images.view(n_ep, min_length, *images.shape[1:])
         diff = torch.norm(zs_true - zs, dim=-1)
-        print('Errors:', diff.cpu().numpy())
+        print('Diff zs:', diff.cpu().numpy()[:, [0, 1]])
+        print('Diff z0, z1', torch.norm(zs_true[:, 1] - zs_true[:, 0], dim=-1).cpu().numpy())
 
         all_imgs = torch.stack((images, recon), dim=1)
         all_imgs = all_imgs.view(-1, *all_imgs.shape[3:])
