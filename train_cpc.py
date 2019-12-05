@@ -67,14 +67,14 @@ def get_dataloaders():
     neg_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
     neg_train_loader = data.DataLoader(neg_train_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2) # for training decoder
-    neg_train_inf = infinite_loader(data.DataLoader(neg_train_dset, batch_size=args.n, shuffle=True,
-                                                    pin_memory=True, num_workers=2)) # to get negative samples
+    neg_train_inf = infinite_loader(data.DataLoader(neg_train_dset, batch_size=args.batch_size * args.n,
+                                                    shuffle=True, pin_memory=True, num_workers=2)) # to get negative samples
 
     neg_test_dset = ImageFolder(join(args.root, 'test_data'), transform=transform)
     neg_test_loader = data.DataLoader(neg_test_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2)
-    neg_test_inf = infinite_loader(data.DataLoader(neg_test_dset, batch_size=args.n, shuffle=True,
-                                                   pin_memory=True, num_workers=2))
+    neg_test_inf = infinite_loader(data.DataLoader(neg_test_dset, batch_size=args.batch_size * args.n,
+                                                   shuffle=True, pin_memory=True, num_workers=2))
 
 
     start_dset = ImageFolder(join(args.root, 'seq_data', 'start'), transform=transform)
@@ -94,7 +94,7 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=None):
     bs = obs.shape[0]
 
     z, z_pos = encoder(obs), encoder(obs_pos)  # b x z_dim
-    z_neg = encoder(obs_neg)  # n x z_dim
+    z_neg = encoder(obs_neg)  # b * n x z_dim
 
     z = torch.cat((z, actions), dim=1) if args.include_actions else z
     z_next = trans(z)  # b x z_dim
@@ -103,7 +103,7 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=None):
     z_pos = z_pos.unsqueeze(2)  # b x z_dim x 1
     pos_log_density = torch.bmm(z_next, z_pos).squeeze(-1)  # b x 1
 
-    z_neg = z_neg.t().unsqueeze(0).repeat(bs, 1, 1)  # b x z_dim x n
+    z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
     neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
 
     loss = torch.cat((torch.zeros(bs, 1).cuda(), neg_log_density - pos_log_density), dim=1)  # b x n+1
@@ -130,7 +130,7 @@ def train_cpc(encoder, trans, optimizer, train_loader, neg_train_inf, epoch):
             obs_neg = apply_fcn_mse(next(neg_train_inf)[0])
         else:
             obs, obs_pos = obs.cuda(), obs_pos.cuda() # b x 1 x 64 x 64
-            obs_neg = next(neg_train_inf)[0].cuda() # n x 1 x 64 x 64
+            obs_neg = next(neg_train_inf)[0].cuda() # b * n x 1 x 64 x 64
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=actions)
         optimizer.zero_grad()
@@ -163,7 +163,7 @@ def test_cpc(encoder, trans, test_loader, neg_test_inf, epoch):
             obs_neg = apply_fcn_mse(next(neg_test_inf)[0])
         else:
             obs, obs_pos = obs.cuda(), obs_pos.cuda()  # b x 1 x 64 x 64
-            obs_neg = next(neg_test_inf)[0].cuda()  # n x 1 x 64 x 64
+            obs_neg = next(neg_test_inf)[0].cuda()  # b * n x 1 x 64 x 64
 
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=actions)
         test_loss += loss.item() * obs.shape[0]
