@@ -58,23 +58,23 @@ def get_dataloaders():
 
     train_dset = ImagePairs(root=join(args.root, 'train_data'), include_actions=args.include_actions,
                             thanard_dset=args.thanard_dset, transform=transform, n_frames_apart=args.k)
-    train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+    train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, num_workers=2, drop_last=True)
 
     test_dset = ImagePairs(root=join(args.root, 'test_data'), include_actions=args.include_actions,
                            thanard_dset=args.thanard_dset, transform=transform, n_frames_apart=args.k)
-    test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+    test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True, num_workers=2, drop_last=True)
 
     neg_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
     neg_train_loader = data.DataLoader(neg_train_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2) # for training decoder
     neg_train_inf = infinite_loader(data.DataLoader(neg_train_dset, batch_size=args.batch_size * args.n,
-                                                    shuffle=True, pin_memory=True, num_workers=2)) # to get negative samples
+                                                    shuffle=True, pin_memory=True, num_workers=2, drop_last=True)) # to get negative samples
 
     neg_test_dset = ImageFolder(join(args.root, 'test_data'), transform=transform)
     neg_test_loader = data.DataLoader(neg_test_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2)
     neg_test_inf = infinite_loader(data.DataLoader(neg_test_dset, batch_size=args.batch_size * args.n,
-                                                   shuffle=True, pin_memory=True, num_workers=2))
+                                                   shuffle=True, pin_memory=True, num_workers=2, drop_last=True))
 
 
     start_dset = ImageFolder(join(args.root, 'seq_data', 'start'), transform=transform)
