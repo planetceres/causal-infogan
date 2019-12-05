@@ -132,14 +132,22 @@ def main():
         imgs = apply_fcn_mse(imgs).cpu()
     utils.save_image(imgs * 0.5 + 0.5, join(folder_name, 'dec_train_img.png'))
 
+    save_nearest_neighbors(encoder, train_loader, test_loader,
+                           -1, folder_name, thanard_dset=args.thanard_dset,
+                           metric='dotproduct')
+    save_recon(model, train_loader, test_loader, encoder,
+               -1, folder_name, thanard_dset=args.thanard_dset)
+    save_interpolation(args.n_interp, model, start_images, goal_images, encoder,
+                       -1, folder_name)
+    save_run_dynamics(model, encoder, trans, start_images, train_loader,
+                      -1, folder_name, args.root,
+                      include_actions=args.include_actions,
+                      thanard_dset=args.thanard_dset)
     for epoch in range(args.epochs):
         train(model, optimizer, train_loader, encoder, epoch)
         test(model, test_loader, encoder, epoch)
 
         if epoch % args.log_interval == 0:
-            save_nearest_neighbors(encoder, train_loader, test_loader,
-                                   epoch, folder_name, thanard_dset=args.thanard_dset,
-                                   metric='dotproduct')
             save_recon(model, train_loader, test_loader, encoder,
                        epoch, folder_name, thanard_dset=args.thanard_dset)
             save_interpolation(args.n_interp, model, start_images, goal_images, encoder,
