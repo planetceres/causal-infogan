@@ -4,6 +4,7 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 from scipy.ndimage.morphology import grey_dilation
+import glob
 
 import torch
 import torch.nn as nn
@@ -12,6 +13,7 @@ import torch.optim as optim
 import torch.utils.data as data
 
 from torchvision import transforms, utils, datasets
+from torchvision.datasets.folder import default_loader
 
 from cpc_model import Decoder
 from model import FCN_mse
@@ -158,6 +160,65 @@ def save_interpolation(model, start_images, goal_images, encoder, epoch, folder_
     utils.save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 2)
 
 
+def save_run_dynamics(decoder, encoder, trans, start_images,
+                      train_loader, epoch, folder_name):
+    decoder.eval()
+    encoder.eval()
+
+    dset = train_loader.dataset
+    transform = dset.transform
+    with torch.no_grad():
+        actions, images = [], []
+        n_ep = 5
+        for i in range(n_ep):
+            class_name = [name for name, idx in dset.class_to_idx.items() if idx == i]
+            assert len(class_name) == 1
+            class_name = class_name[0]
+
+            a = np.load(join(args.root, 'train_data', class_name, 'actions.npy'))
+            a = torch.FloatTensor(a)
+            actions.append(a)
+            ext = 'jpg' if args.thanard_dset else 'png'
+            img_files = glob.glob(join(args.root, 'train_data', class_name, '*.{}'.format(ext)))
+            img_files = sorted(img_files)
+            image = torch.stack([transform(default_loader(f)) for f in img_files], dim=0)
+            images.append(image)
+        min_length = min(min([img.shape[0] for img in images]), 10)
+        actions = [a[:min_length] for a in actions]
+        images = [img[:min_length] for img in images]
+        actions, images = torch.stack(actions, dim=0), torch.stack(images, dim=0)
+        images = images.view(-1, *images.shape[2:])
+        images = apply_fcn_mse(images) if args.thanard_dset else images.cuda()
+        images = images.view(n_ep, min_length, *images.shape[1:])
+        actions = actions.cuda()
+
+        zs = [encoder(images[:, 0])]
+        for i in range(min_length - 1):
+            inp = torch.cat((zs[-1], actions[:, i]), dim=1) if args.include_actions else zs[-1]
+            zs.append(trans(inp))
+        zs = torch.stack(zs, dim=1)
+        zs = zs.view(-1, args.z_dim)
+        recon = decoder(zs)
+        recon = recon.view(n_ep, min_length, *images.shape[2:])
+
+        images = images.view(-1, *images.shape[2:])
+        zs_true = encoder(images)
+        zs_true = zs_true.view(n_ep, min_length, encoder.z_dim)
+        images = images.view(n_ep, min_length, *images.shape[1:])
+        diff = torch.norm(zs_true - zs, dim=-1)
+        print('Errors:', diff.cpu().numpy())
+
+        all_imgs = torch.stack((images, recon), dim=1)
+        all_imgs = all_imgs.view(-1, *all_imgs.shape[3:])
+
+        folder_name = join(folder_name, 'run_dynamics')
+        if not exists(folder_name):
+            os.makedirs(folder_name)
+
+        filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
+        utils.save_image(all_imgs * 0.5 + 0.5, filename, nrow=min_length)
+
+
 def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -174,6 +235,8 @@ def main():
 
     encoder = torch.load(join(folder_name, 'encoder.pt'), map_location='cuda')
     encoder.eval()
+    trans = torch.load(join(folder_name, 'trans.pt'), map_location='cuda')
+    trans.eval()
 
     model = Decoder(encoder.z_dim, 1).cuda()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -190,6 +253,7 @@ def main():
         if epoch % args.log_interval == 0:
             save_recon(model, train_loader, test_loader, encoder, epoch, folder_name)
             save_interpolation(model, start_images, goal_images, encoder, epoch, folder_name)
+            save_run_dynamics(model, encoder, trans, start_images, train_loader, epoch, folder_name)
             torch.save(model, join(folder_name, 'decoder.pt'))
 
 
@@ -198,6 +262,7 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=str, default='data/rope')
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--thanard_dset', action='store_true')
+    parser.add_argument('--include_actions', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
