@@ -19,17 +19,13 @@ from torchvision.datasets.folder import default_loader
 from dataset import ImagePairs
 from cpc_model import Encoder, Decoder, Transition
 from model import FCN_mse
+from cpc_util import *
 
 
 def infinite_loader(data_loader):
     while True:
         for batch in data_loader:
             yield batch
-
-
-def apply_fcn_mse(img):
-    o = fcn(img.cuda()).detach()
-    return torch.clamp(2 * (o - 0.5), -1 + 1e-3, 1 - 1e-3)
 
 
 def get_dataloaders():
@@ -215,172 +211,6 @@ def test_decoder(decoder, test_loader, encoder, epoch):
     print('Dec Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss))
 
 
-def save_nearest_neighbors(encoder, train_loader, test_loader,
-                           epoch, folder_name, k=100):
-    encoder.eval()
-
-    train_batch = next(iter(train_loader))[0][:5]
-    test_batch = next(iter(test_loader))[0][:5]
-
-    with torch.no_grad():
-        batch = torch.cat((train_batch, test_batch), dim=0)
-        batch = apply_fcn_mse(batch) if args.thanard_dset else batch.cuda()
-        z = encoder(batch) # 10 x z_dim
-        zz = (z ** 2).sum(-1).unsqueeze(1) # z^Tz, 10 x 1
-
-        pbar = tqdm(total=len(train_loader.dataset) + len(test_loader.dataset))
-        pbar.set_description('Computing NN')
-        dists = []
-        for loader in [train_loader, test_loader]:
-            for x, _ in loader:
-                x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
-                zx = encoder(x) # b x z_dim
-                zzx = torch.matmul(z, zx.t()) # z_1^Tz_2, 10 x b
-                zxzx = (zx ** 2).sum(-1).unsqueeze(0) #zx^Tzx, 1 x b
-                dist = zz - 2 * zzx + zxzx # norm squared distance, 10 x b
-                dists.append(dist.cpu())
-                pbar.update(x.shape[0])
-        dists = torch.cat(dists, dim=1) # 10 x dset_size
-        topk = torch.topk(dists, k + 1, dim=1, largest=False)[1]
-
-        pbar.close()
-
-    folder_name = join(folder_name, 'nn_epoch{}'.format(epoch))
-    if not exists(folder_name):
-        os.makedirs(folder_name)
-
-    train_size = len(train_loader.dataset)
-    for i in range(10):
-        imgs = []
-        for idx in topk[i]:
-            if idx >= train_size:
-                imgs.append(test_loader.dataset[idx - train_size][0])
-            else:
-                imgs.append(train_loader.dataset[idx][0])
-        imgs = torch.stack(imgs, dim=0)
-        if args.thanard_dset:
-            imgs = apply_fcn_mse(imgs).cpu()
-        save_image(imgs * 0.5 + 0.5, join(folder_name, 'nn_{}.png'.format(i)), nrow=10)
-
-
-def save_recon(decoder, train_loader, test_loader, encoder, epoch, folder_name):
-    decoder.eval()
-    encoder.eval()
-
-    train_batch = next(iter(train_loader))[0][:16]
-    test_batch = next(iter(test_loader))[0][:16]
-    if args.thanard_dset:
-        train_batch, test_batch = apply_fcn_mse(train_batch), apply_fcn_mse(test_batch)
-    else:
-        train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
-
-    with torch.no_grad():
-        train_z, test_z = encoder(train_batch), encoder(test_batch)
-        train_recon, test_recon = decoder(train_z), decoder(test_z)
-
-    real_imgs = torch.cat((train_batch, test_batch), dim=0)
-    recon_imgs = torch.cat((train_recon, test_recon), dim=0)
-    imgs = torch.stack((real_imgs, recon_imgs), dim=1)
-    imgs = imgs.view(-1, *real_imgs.shape[1:]).cpu()
-
-    folder_name = join(folder_name, 'reconstructions')
-    if not exists(folder_name):
-        os.makedirs(folder_name)
-
-    filename = join(folder_name, 'recon_epoch{}.png'.format(epoch))
-    save_image(imgs * 0.5 + 0.5, filename, nrow=8)
-
-
-def save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name):
-    decoder.eval()
-    encoder.eval()
-
-    with torch.no_grad():
-        z_start = encoder(start_images)
-        z_goal = encoder(goal_images)
-
-        lambdas = np.linspace(0, 1, args.n_interp + 2)
-        zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
-                          for lambda_ in lambdas], dim=1)  # n x n_interp+2 x z_dim
-        zs = zs.view(-1, args.z_dim)  # n * (n_interp+2) x z_dim
-
-        imgs = decoder(zs).cpu()
-
-    folder_name = join(folder_name, 'interpolations')
-    if not exists(folder_name):
-        os.makedirs(folder_name)
-
-    filename = join(folder_name, 'interp_epoch{}.png'.format(epoch))
-    save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 2)
-
-
-def save_run_dynamics(decoder, encoder, trans, start_images,
-                      train_loader, epoch, folder_name):
-    decoder.eval()
-    encoder.eval()
-
-    if args.include_actions:
-        dset = train_loader.dataset
-        transform = dset.transform
-        with torch.no_grad():
-            actions, images = [], []
-            n_ep = 5
-            for i in range(n_ep):
-                class_name = [name for name, idx in dset.class_to_idx.items() if idx == i]
-                assert len(class_name) == 1
-                class_name = class_name[0]
-
-                a = np.load(join(args.root, 'train_data', class_name, 'actions.npy'))
-                a = torch.FloatTensor(a)
-                actions.append(a)
-                ext = 'jpg' if args.thanard_dset else 'png'
-                img_files = glob.glob(join(args.root, 'train_data', class_name, '*.{}'.format(ext)))
-                img_files = sorted(img_files)
-                image = torch.stack([transform(default_loader(f)) for f in img_files], dim=0)
-                images.append(image)
-            min_length = min(min([img.shape[0] for img in images]), 10)
-            actions = [a[:min_length] for a in actions]
-            images = [img[:min_length] for img in images]
-            actions, images = torch.stack(actions, dim=0), torch.stack(images, dim=0)
-            images = images.view(-1, *images.shape[2:])
-            images = apply_fcn_mse(images) if args.thanard_dset else images.cuda()
-            images = images.view(n_ep, min_length, *images.shape[1:])
-            actions = actions.cuda()
-
-            zs = [encoder(images[:, 0])]
-            for i in range(min_length - 1):
-                zs.append(trans(torch.cat((zs[-1], actions[:, i]), dim=1)))
-            zs = torch.stack(zs, dim=1)
-            zs = zs.view(-1, args.z_dim)
-            recon = decoder(zs)
-            recon = recon.view(n_ep, min_length, *images.shape[2:])
-
-            all_imgs = torch.stack((images, recon), dim=1)
-            all_imgs = all_imgs.view(-1, *all_imgs.shape[3:])
-
-            folder_name = join(folder_name, 'run_dynamics')
-            if not exists(folder_name):
-                os.makedirs(folder_name)
-
-            filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
-            save_image(all_imgs * 0.5 + 0.5, filename, nrow=min_length)
-    else:
-        with torch.no_grad():
-            zs = [encoder(start_images)]
-            for _ in range(args.n_interp):
-                zs.append(trans(zs[-1]))
-            zs = torch.stack(zs, dim=1)
-            zs = zs.view(-1, args.z_dim)
-            imgs = decoder(zs).cpu()
-
-        folder_name = join(folder_name, 'run_dynamics')
-        if not exists(folder_name):
-            os.makedirs(folder_name)
-
-        filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
-        save_image(imgs * 0.5 + 0.5, filename, nrow=args.n_interp + 1)
-
-
 def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -434,12 +264,18 @@ def main():
 
         if epoch % args.log_interval == 0:
             train_decoder(decoder, optim_dec, neg_train_loader, encoder, epoch)
-            # test_decoder(decoder, neg_test_loader, encoder, epoch)
+            test_decoder(decoder, neg_test_loader, encoder, epoch)
 
-            save_recon(decoder, neg_train_loader, neg_test_loader, encoder, epoch, folder_name)
-            save_interpolation(decoder, start_images, goal_images, encoder, epoch, folder_name)
-            save_run_dynamics(decoder, encoder, trans, start_images, neg_train_loader, epoch, folder_name)
-            save_nearest_neighbors(encoder, neg_train_loader, neg_test_loader, epoch, folder_name)
+            save_recon(decoder, neg_train_loader, neg_test_loader, encoder,
+                       epoch, folder_name, thanard_dset=args.thanard_dset)
+            save_interpolation(args.n_interp, decoder, start_images,
+                               goal_images, encoder, epoch, folder_name)
+            save_run_dynamics(decoder, encoder, trans, start_images,
+                              neg_train_loader, epoch, folder_name, args.root,
+                              include_actions=args.include_actions,
+                              thanard_dset=args.thanard_dset)
+            save_nearest_neighbors(encoder, neg_train_loader, neg_test_loader,
+                                   epoch, folder_name, thanard_dset=args.thanard_dset)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
@@ -465,10 +301,5 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='cpc')
     args = parser.parse_args()
-
-    if args.thanard_dset:
-        fcn = FCN_mse(2).cuda()
-        fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
-        fcn.eval()
 
     main()
