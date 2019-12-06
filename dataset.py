@@ -288,25 +288,23 @@ class NCEVineDataset(data.Dataset):
         self.nst = data['neg_samples_t']
         self.nstraj = data['neg_samples_traj']
         self.pos_pairs = data['pos_pairs']
-        self.all_images = data['all_images']
+        self.image_paths = data['all_images']
+
+        with open(join(root, 'images.pkl'), 'rb') as f:
+            self.images = pkl.load(f)
+        self.img2idx = {self.image_paths[i]: i for i in range(len(self.all_images))}
 
         self.transform = transform
         self.loader = loader
         self.n_neg = n_neg
         assert n_neg % 3 == 0
 
-        self.img2idx = {i: self.all_images[i] for i in range(len(self.all_images))}
-        self.loaded_images = torch.stack([self._get_image(img, preloaded=False)
-                                          for img in self.all_images], dim=0)
+        self.loaded_images = []
+        for img in tqdm(self.all_images):
+            self.loaded_images.append(self._get_image(img, preloaded=False))
 
     def _get_image(self, path, preloaded=True):
-        if preloaded:
-            return self.loaded_images[self.img2idx[path]]
-
-        img = self.loader(path)
-        if self.transform is not None:
-            img = self.transform(img)
-        return img
+        return self.images[self.img2idx[path]]
 
     def __len__(self):
         return len(self.pos_pairs)
