@@ -330,4 +330,4 @@ class NCEVineDataset(data.Dataset):
 
         neg_images = torch.stack([self._get_image(img) for img in all_images], dim=0)
 
-        return obs, obs_next, action, neg_images
+        return obs, obs_next, torch.FloatTensor(action), neg_images

@@ -80,7 +80,7 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions):
     z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
     neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
     if args.mode == 'cos':
-        neg_log_density /= torch.norm(z_next, dim=1, keepdim=True) * torch.norm(z_neg, dim=1)
+        neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
 
     loss = torch.cat((torch.zeros(bs, 1).cuda(), neg_log_density - pos_log_density), dim=1)  # b x n+1
     loss = torch.logsumexp(loss, dim=1).mean()
@@ -174,7 +174,7 @@ def main():
     action_dim = 4
 
     encoder = Encoder(args.z_dim, obs_dim[0]).cuda()
-    trans = Transition(args.z_dim, args.include_actions * action_dim).cuda()
+    trans = Transition(args.z_dim, action_dim).cuda()
     decoder = Decoder(args.z_dim, obs_dim[0]).cuda()
 
     optim_cpc = optim.Adam(list(encoder.parameters()) + list(trans.parameters()),
