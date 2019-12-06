@@ -103,18 +103,33 @@ def save_recon(decoder, train_loader, test_loader, encoder, epoch,
 
 
 def save_interpolation(n_interp, decoder, start_images, goal_images,
-                       encoder, epoch, folder_name):
+                       encoder, epoch, folder_name, type='slerp'):
+    assert type in ['linear', 'slerp']
     decoder.eval()
     encoder.eval()
 
     with torch.no_grad():
-        z_start = encoder(start_images)
-        z_goal = encoder(goal_images)
+        z_start = encoder(start_images) # b x z_dim
+        z_goal = encoder(goal_images) # b x z_dim
         z_dim = z_start.shape[1]
 
         lambdas = np.linspace(0, 1, n_interp + 2)
-        zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
-                          for lambda_ in lambdas], dim=1)  # n x n_interp+2 x z_dim
+
+        if type == 'linear':
+            zs = torch.stack([(1 - lambda_) * z_start + lambda_ * z_goal
+                              for lambda_ in lambdas], dim=1)  # n x n_interp+2 x z_dim
+        elif type == 'slerp':
+            omegas = (z_start * z_goal).sum(1)
+            omegas /= torch.norm(z_start, dim=1) * torch.norm(z_goal, dim=1)
+            omegas = torch.acos(torch.clip(omegas, -1, 1)).unsqueeze(1) # b x 1
+            zs = []
+            for lambda_ in lambdas:
+                a1 = torch.sin((1 - lambda_) * omegas) / torch.sin(omegas)
+                a2 = torch.sin(lambda_ * omegas) / torch.sin(omegas)
+                zs.append(a1 * z_start + a2 * z_goal)
+            zs = torch.stack(zs, dim=1)
+        else:
+            raise Exception('Invalid type {}'.format(type))
         zs = zs.view(-1, z_dim)  # n * (n_interp+2) x z_dim
 
         imgs = decoder(zs).cpu()
