@@ -161,11 +161,10 @@ class ImagePairs(data.Dataset):
 
     url = 'https://drive.google.com/uc?export=download&confirm=ypZ7&id=10xovkLQ09BDvhtpD_nqXWFX-rlNzMVl9'
 
-    def __init__(self, root, include_actions=False, transform=None, target_transform=None, thanard_dset=False,
+    def __init__(self, root, include_actions=False, transform=None, target_transform=None,
                  loader=default_loader, n_frames_apart=1, download=False, include_neg=False):
         self.root = root
         self.include_actions = include_actions
-        self.thanard_dset = thanard_dset
         if download:
             self.download()
 
@@ -189,14 +188,6 @@ class ImagePairs(data.Dataset):
         if include_neg:
             neg_img_pairs = make_negative_pairs(imgs, resets, root)
             self.img_pairs += neg_img_pairs
-
-        if self.include_actions:
-            if self.thanard_dset:
-                self.mean = np.array([121.65736939, 109.50327158,   2.77160466,   0.13424053, 0.87449964])
-                self.std = np.array([39.65629748, 26.78163011,  1.78058705,  0.15868182,  0.3312854])
-            else:
-                self.mean = np.array([0.5, 0.5, 0., 0.])
-                self.std = np.array([0.5, 0.5, 1., 1.])
 
 
     def _get_image(self, path):
@@ -260,8 +251,7 @@ class ImagePairs(data.Dataset):
                 dir_name = dirname(path)
                 actions = np.load(join(dir_name, 'actions.npy'))
                 i = int(basename(path).split('.')[0].split('_')[1])
-                a = (actions[i] - self.mean) / self.std
-                output.append((img, target, torch.FloatTensor(a)))
+                output.append((img, target, torch.FloatTensor(actions[i])))
             else:
                 output.append((img, target))
         return output
@@ -278,3 +268,55 @@ class ImagePairs(data.Dataset):
         tmp = '    Target Transforms (if any): '
         fmt_str += '{0}{1}'.format(tmp, self.target_transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
         return fmt_str
+
+class NCEVineDataset(data.Dataset):
+    def __init__(self, root, n_neg, transform=None, loader=default_loader):
+        self.root = root
+        with open(join(root, 'pos_neg_pairs.pkl'), 'rb') as f:
+            data = pkl.load(f)
+        self.nst = data['neg_samples_t']
+        self.nstraj = data['neg_samples_traj']
+        self.pos_pairs = data['pos_pairs']
+        self.all_images = data['all_images']
+
+        self.transform = transform
+        self.loader = loader
+        self.n_neg = n_neg
+        assert n_neg % 3 == 0
+
+    def _get_image(self, path):
+        img = self.loader(path)
+        if self.transform is not None:
+            img = self.transform(img)
+        return img
+
+    def __len__(self):
+        return len(self.pos_pairs)
+
+    def __getitem__(self, index):
+        obs_file, obs_next_file, action_file = self.pos_pairs[index]
+        obs, obs_next = self._get_image(obs_file), self._get_image(obs_next_file)
+        actions = np.load(action_file)
+
+        fsplit = obs_next_file.split('_')
+        t = int(fsplit[-2])
+        k = int(fsplit[-1].split('.')[0])
+        action = actions[t-1, k]
+
+        run = os.path.dirname(obs_file)
+        n_per = self.n_neg // 3
+        nst = self.nst[run][t-1]
+        nstraj = self.nstraj[run][t-1]
+
+        t_idxs = np.random.randint(0, len(nst), size=(n_per,))
+        traj_idxs = np.random.randint(0, len(nstraj), size=(n_per,))
+        other_idxs = np.random.randint(0, len(self.all_images), size=(n_per,))
+
+        t_images = [nst[idx] for idx in t_idxs]
+        traj_images = [nstraj[idx] for idx in traj_idxs]
+        other_images = [self.all_images[idx] for idx in other_idxs]
+        all_images = t_images + traj_images + other_images
+
+        neg_images = torch.stack([self._get_image(img) for img in all_images], dim=0)
+
+        return obs, obs_next, action, neg_images
