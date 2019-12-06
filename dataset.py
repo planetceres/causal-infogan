@@ -295,7 +295,14 @@ class NCEVineDataset(data.Dataset):
         self.n_neg = n_neg
         assert n_neg % 3 == 0
 
-    def _get_image(self, path):
+        self.img2idx = {i: self.all_images[i] for i in range(len(self.all_images))}
+        self.loaded_images = torch.stack([self._get_image(img, preloaded=False)
+                                          for img in self.all_images], dim=0)
+
+    def _get_image(self, path, preloaded=True):
+        if preloaded:
+            return self.loaded_images[self.img2idx[path]]
+
         img = self.loader(path)
         if self.transform is not None:
             img = self.transform(img)
