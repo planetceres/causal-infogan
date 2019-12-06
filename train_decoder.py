@@ -1,19 +1,13 @@
-import os
-from os.path import join, exists
-import numpy as np
 from tqdm import tqdm
 import argparse
 from scipy.ndimage.morphology import grey_dilation
-import glob
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data as data
 
 from torchvision import transforms, utils, datasets
-from torchvision.datasets.folder import default_loader
 
 from cpc_model import Decoder
 from cpc_util import *
@@ -50,22 +44,13 @@ def get_data():
 
     train_dset = datasets.ImageFolder(join(args.root, 'train_data'), transform=transform)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True,
-                                  pin_memory=True, num_workers=2)
+                                  pin_memory=True, num_workers=4)
 
     test_dset = datasets.ImageFolder(join(args.root, 'test_data'), transform=transform)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True,
-                                  pin_memory=True, num_workers=2)
+                                  pin_memory=True, num_workers=4)
 
-    start_dset = datasets.ImageFolder(join(args.root, 'seq_data', 'start'), transform=transform)
-    goal_dset = datasets.ImageFolder(join(args.root, 'seq_data', 'goal'), transform=transform)
-
-    start_images = torch.stack([start_dset[i][0] for i in range(len(start_dset))], dim=0)
-    goal_images = torch.stack([goal_dset[i][0] for i in range(len(goal_dset))], dim=0)
-
-    n = min(start_images.shape[0], goal_images.shape[0])
-    start_images, goal_images = start_images[:n], goal_images[:n]
-
-    return train_loader, test_loader, start_images, goal_images
+    return train_loader, test_loader
 
 
 def train(model, optimizer, train_loader, encoder, epoch):
