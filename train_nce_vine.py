@@ -71,12 +71,16 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions):
     z = torch.cat((z, actions), dim=1)
     z_next = trans(z)  # b x z_dim
 
-    z_next = z_next.unsqueeze(1)  # b x 1 x z_dim
-    z_pos = z_pos.unsqueeze(2)  # b x z_dim x 1
-    pos_log_density = torch.bmm(z_next, z_pos).squeeze(-1)  # b x 1
+    pos_log_density = (z_next * z_pos).sum(dim=1)
+    if args.mode == 'cos':
+        pos_log_density /= torch.norm(z_next, dim=1) * torch.norm(z_pos, dim=1)
+    pos_log_density = pos_log_density.unsqueeze(1)
 
+    z_next = z_next.unsqueeze(1)
     z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
     neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
+    if args.mode == 'cos':
+        neg_log_density /= torch.norm(z_next, dim=1, keepdim=True) * torch.norm(z_neg, dim=1)
 
     loss = torch.cat((torch.zeros(bs, 1).cuda(), neg_log_density - pos_log_density), dim=1)  # b x n+1
     loss = torch.logsumexp(loss, dim=1).mean()
@@ -208,7 +212,7 @@ def main():
                               dec_train_loader, epoch, folder_name, args.root,
                               include_actions=True)
             save_nearest_neighbors(encoder, dec_train_loader, dec_test_loader,
-                                   epoch, folder_name)
+                                   epoch, folder_name, metric='dotproduct')
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
@@ -219,6 +223,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, default='data/rope2')
     parser.add_argument('--n_interp', type=int, default=8)
+    parser.add_argument('--mode', type=str, default='dotproduct')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
@@ -232,5 +237,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='cpc')
     args = parser.parse_args()
+
+    assert args.mode in ['dotproduct', 'cos']
 
     main()

@@ -162,9 +162,11 @@ class ImagePairs(data.Dataset):
     url = 'https://drive.google.com/uc?export=download&confirm=ypZ7&id=10xovkLQ09BDvhtpD_nqXWFX-rlNzMVl9'
 
     def __init__(self, root, include_actions=False, transform=None, target_transform=None,
-                 loader=default_loader, n_frames_apart=1, download=False, include_neg=False):
+                 loader=default_loader, n_frames_apart=1, download=False, include_neg=False,
+                 thanard_dset=False):
         self.root = root
         self.include_actions = include_actions
+        self.thanard_dset = thanard_dset
         if download:
             self.download()
 
@@ -188,6 +190,14 @@ class ImagePairs(data.Dataset):
         if include_neg:
             neg_img_pairs = make_negative_pairs(imgs, resets, root)
             self.img_pairs += neg_img_pairs
+
+        if self.include_actions:
+            if self.thanard_dset:
+                self.mean = np.array([121.65736939, 109.50327158,   2.77160466,   0.13424053, 0.87449964])
+                self.std = np.array([39.65629748, 26.78163011,  1.78058705,  0.15868182,  0.3312854])
+            else:
+                self.mean = np.array([0.5, 0.5, 0., 0.])
+                self.std = np.array([0.5, 0.5, 1., 1.])
 
 
     def _get_image(self, path):
@@ -251,7 +261,8 @@ class ImagePairs(data.Dataset):
                 dir_name = dirname(path)
                 actions = np.load(join(dir_name, 'actions.npy'))
                 i = int(basename(path).split('.')[0].split('_')[1])
-                output.append((img, target, torch.FloatTensor(actions[i])))
+                a = (actions[i] - self.mean) / self.std
+                output.append((img, target, torch.FloatTensor(a)))
             else:
                 output.append((img, target))
         return output

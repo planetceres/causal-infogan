@@ -1,5 +1,5 @@
 from tqdm import tqdm
-import numpy san p
+import numpy as np
 import glob
 from os.path import join, exists
 import os
@@ -64,9 +64,9 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
         imgs = []
         for idx in topk[i]:
             if idx >= train_size:
-                imgs.append(train_loader.dataset[idx - train_size][0])
+                imgs.append(test_loader.dataset[idx - train_size][0])
             else:
-                imgs.append(test_loader.dataset[idx][0])
+                imgs.append(train_loader.dataset[idx][0])
         imgs = torch.stack(imgs, dim=0)
         if thanard_dset:
             imgs = apply_fcn_mse(imgs).cpu()
