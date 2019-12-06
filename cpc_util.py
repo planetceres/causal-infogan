@@ -1,5 +1,5 @@
 from tqdm import tqdm
-import numpy as np
+import numpy san p
 import glob
 from os.path import join, exists
 import os
@@ -64,9 +64,9 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
         imgs = []
         for idx in topk[i]:
             if idx >= train_size:
-                imgs.append(test_loader.dataset[idx - train_size][0])
+                imgs.append(train_loader.dataset[idx - train_size][0])
             else:
-                imgs.append(train_loader.dataset[idx][0])
+                imgs.append(test_loader.dataset[idx][0])
         imgs = torch.stack(imgs, dim=0)
         if thanard_dset:
             imgs = apply_fcn_mse(imgs).cpu()
@@ -127,9 +127,10 @@ def save_interpolation(n_interp, decoder, start_images, goal_images,
     save_image(imgs * 0.5 + 0.5, filename, nrow=n_interp + 2)
 
 
-def save_run_dynamics(decoder, encoder, trans, start_images,
+def save_run_dynamics(decoder, encoder, trans,
                       train_loader, epoch, folder_name, root,
-                      include_actions=False, thanard_dset=False):
+                      include_actions=False, thanard_dset=False,
+                      vine=False):
     decoder.eval()
     encoder.eval()
 
@@ -144,10 +145,16 @@ def save_run_dynamics(decoder, encoder, trans, start_images,
             class_name = class_name[0]
 
             a = np.load(join(root, 'train_data', class_name, 'actions.npy'))
+            if vine:
+                a = a[:, 0]
             a = torch.FloatTensor(a)
             actions.append(a)
             ext = 'jpg' if thanard_dset else 'png'
-            img_files = glob.glob(join(root, 'train_data', class_name, '*.{}'.format(ext)))
+            if vine:
+                fpath = join(root, 'train_data', class_name, 'img_*_000.{}'.format(ext))
+            else:
+                fpath = sjoin(root, 'train_data', class_name, '*.{}'.format(ext))
+            img_files = glob.glob(fpath)
             img_files = sorted(img_files)
             image = torch.stack([transform(default_loader(f)) for f in img_files], dim=0)
             images.append(image)
