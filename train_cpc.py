@@ -67,13 +67,13 @@ def get_dataloaders():
     neg_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
     neg_train_loader = data.DataLoader(neg_train_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2) # for training decoder
-    neg_train_inf = infinite_loader(data.DataLoader(neg_train_dset, batch_size=args.batch_size * args.n,
+    neg_train_inf = infinite_loader(data.DataLoader(neg_train_dset, batch_size=args.n,
                                                     shuffle=True, pin_memory=True, num_workers=2, drop_last=True)) # to get negative samples
 
     neg_test_dset = ImageFolder(join(args.root, 'test_data'), transform=transform)
     neg_test_loader = data.DataLoader(neg_test_dset, batch_size=args.batch_size, shuffle=True,
                                        pin_memory=True, num_workers=2)
-    neg_test_inf = infinite_loader(data.DataLoader(neg_test_dset, batch_size=args.batch_size * args.n,
+    neg_test_inf = infinite_loader(data.DataLoader(neg_test_dset, batch_size=args.n,
                                                    shuffle=True, pin_memory=True, num_workers=2, drop_last=True))
 
 
@@ -94,7 +94,7 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=None):
     bs = obs.shape[0]
 
     z, z_pos = encoder(obs), encoder(obs_pos)  # b x z_dim
-    z_neg = encoder(obs_neg)  # b * n x z_dim
+    z_neg = encoder(obs_neg)  # n x z_dim
 
     z = torch.cat((z, actions), dim=1) if args.include_actions else z
     z_next = trans(z)  # b x z_dim
@@ -105,7 +105,7 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=None):
     pos_log_density = pos_log_density.unsqueeze(1)
 
     z_next = z_next.unsqueeze(1)
-    z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
+    z_neg = z_neg.view(1, args.n, args.z_dim).repeat(bs, 1, 1).permute(0, 2, 1).contiguous() # b x z_dim x n
     neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
     if args.mode == 'cos':
         neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
@@ -274,7 +274,7 @@ def main():
                        epoch, folder_name, thanard_dset=args.thanard_dset)
             save_interpolation(args.n_interp, decoder, start_images,
                                goal_images, encoder, epoch, folder_name)
-            save_run_dynamics(decoder, encoder, trans, start_images,
+            save_run_dynamics(decoder, encoder, trans,
                               neg_train_loader, epoch, folder_name, args.root,
                               include_actions=args.include_actions,
                               thanard_dset=args.thanard_dset)

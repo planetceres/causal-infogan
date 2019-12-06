@@ -292,16 +292,12 @@ class NCEVineDataset(data.Dataset):
 
         with open(join(root, 'images.pkl'), 'rb') as f:
             self.images = pkl.load(f)
-        self.img2idx = {self.image_paths[i]: i for i in range(len(self.all_images))}
+        self.img2idx = {self.image_paths[i]: i for i in range(len(self.image_paths))}
 
         self.transform = transform
         self.loader = loader
         self.n_neg = n_neg
         assert n_neg % 3 == 0
-
-        self.loaded_images = []
-        for img in tqdm(self.all_images):
-            self.loaded_images.append(self._get_image(img, preloaded=False))
 
     def _get_image(self, path, preloaded=True):
         return self.images[self.img2idx[path]]
@@ -326,11 +322,11 @@ class NCEVineDataset(data.Dataset):
 
         t_idxs = np.random.randint(0, len(nst), size=(n_per,))
         traj_idxs = np.random.randint(0, len(nstraj), size=(n_per,))
-        other_idxs = np.random.randint(0, len(self.all_images), size=(n_per,))
+        other_idxs = np.random.randint(0, len(self.image_paths), size=(n_per,))
 
         t_images = [nst[idx] for idx in t_idxs]
         traj_images = [nstraj[idx] for idx in traj_idxs]
-        other_images = [self.all_images[idx] for idx in other_idxs]
+        other_images = [self.image_paths[idx] for idx in other_idxs]
         all_images = t_images + traj_images + other_images
 
         neg_images = torch.stack([self._get_image(img) for img in all_images], dim=0)

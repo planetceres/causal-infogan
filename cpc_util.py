@@ -121,7 +121,7 @@ def save_interpolation(n_interp, decoder, start_images, goal_images,
         elif type == 'slerp':
             omegas = (z_start * z_goal).sum(1)
             omegas /= torch.norm(z_start, dim=1) * torch.norm(z_goal, dim=1)
-            omegas = torch.acos(torch.clip(omegas, -1, 1)).unsqueeze(1) # b x 1
+            omegas = torch.acos(torch.clamp(omegas, -1, 1)).unsqueeze(1) # b x 1
             zs = []
             for lambda_ in lambdas:
                 a1 = torch.sin((1 - lambda_) * omegas) / torch.sin(omegas)
@@ -168,7 +168,7 @@ def save_run_dynamics(decoder, encoder, trans,
             if vine:
                 fpath = join(root, 'train_data', class_name, 'img_*_000.{}'.format(ext))
             else:
-                fpath = sjoin(root, 'train_data', class_name, '*.{}'.format(ext))
+                fpath = join(root, 'train_data', class_name, '*.{}'.format(ext))
             img_files = glob.glob(fpath)
             img_files = sorted(img_files)
             image = torch.stack([transform(default_loader(f)) for f in img_files], dim=0)

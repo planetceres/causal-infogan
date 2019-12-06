@@ -195,28 +195,31 @@ def main():
     obs_neg = obs_neg.view(-1, *obs_dim)[:100]
     save_image(obs_neg * 0.5 + 0.5, join(folder_name, 'neg.png'), nrow=10)
 
+    torch.save(encoder, join(folder_name, 'encoder.pt'))
+    torch.save(trans, join(folder_name, 'trans.pt'))
+    torch.save(decoder, join(folder_name, 'decoder.pt'))
     for epoch in range(args.epochs):
         train_cpc(encoder, trans, optim_cpc, train_loader, epoch)
-        test_cpc(encoder, trans, test_loader, epoch)
+    #    test_cpc(encoder, trans, test_loader, epoch)
 
         if epoch % args.log_interval == 0:
-            train_decoder(decoder, optim_dec, dec_train_loader, encoder, epoch)
-            test_decoder(decoder, dec_test_loader, encoder, epoch)
+    #        train_decoder(decoder, optim_dec, dec_train_loader, encoder, epoch)
+    #        test_decoder(decoder, dec_test_loader, encoder, epoch)
 
-            save_recon(decoder, dec_train_loader, dec_test_loader, encoder,
-                       epoch, folder_name)
-            start_images, goal_images = next(iter(dec_train_loader))[:20].cuda().chunk(2, dim=0)
-            save_interpolation(args.n_interp, decoder, start_images,
-                               goal_images, encoder, epoch, folder_name)
-            save_run_dynamics(decoder, encoder, trans,
-                              dec_train_loader, epoch, folder_name, args.root,
-                              include_actions=True)
-            save_nearest_neighbors(encoder, dec_train_loader, dec_test_loader,
-                                   epoch, folder_name, metric='dotproduct')
+    #        save_recon(decoder, dec_train_loader, dec_test_loader, encoder,
+    #                   epoch, folder_name)
+    #        start_images, goal_images = next(iter(dec_train_loader))[0][:20].cuda().chunk(2, dim=0)
+    #        save_interpolation(args.n_interp, decoder, start_images,
+    #                           goal_images, encoder, epoch, folder_name)
+     #       save_run_dynamics(decoder, encoder, trans,
+     #                         dec_train_loader, epoch, folder_name, args.root,
+      #                        include_actions=True, vine=True)
+      #      save_nearest_neighbors(encoder, dec_train_loader, dec_test_loader,
+      #                             epoch, folder_name, metric='dotproduct')
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
-            torch.save(trans, join(folder_name, 'decoder.pt'))
+       #     torch.save(decoder, join(folder_name, 'decoder.pt'))
 
 
 if __name__ == '__main__':
