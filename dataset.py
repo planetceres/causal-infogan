@@ -1,4 +1,5 @@
 import torch.utils.data as data
+import h5py
 import torch
 import numpy as np
 import pickle as pkl
@@ -290,8 +291,7 @@ class NCEVineDataset(data.Dataset):
         self.pos_pairs = data['pos_pairs']
         self.image_paths = data['all_images']
 
-        with open(join(root, 'images.pkl'), 'rb') as f:
-            self.images = pkl.load(f)
+        self.images = h5py.File(join(root, 'images.hdf5'), 'r')['images'][:]
         self.img2idx = {self.image_paths[i]: i for i in range(len(self.image_paths))}
 
         self.transform = transform
@@ -300,7 +300,10 @@ class NCEVineDataset(data.Dataset):
         assert n_neg % 3 == 0
 
     def _get_image(self, path, preloaded=True):
-        return self.images[self.img2idx[path]]
+        img = self.images[self.img2idx[path]]
+        img = img.astype('float32') / 255
+        img = (img - 0.5) / 0.5
+        return torch.FloatTensor(img)
 
     def __len__(self):
         return len(self.pos_pairs)

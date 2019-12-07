@@ -1,8 +1,10 @@
 import argparse
-import pickle
 from os.path import join
 from tqdm import tqdm
 from scipy.ndimage.morphology import grey_dilation
+import h5py
+import numpy as np
+import pickle
 
 import torch
 from torchvision import transforms
@@ -36,10 +38,12 @@ transform = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,)),
 ])
 
-
+dset = h5py.File(join(args.root, 'images.hdf5'), 'x')
+dset.create_dataset('images', (len(all_images), 1, 64, 64), 'uint8')
 stored = []
-for img in tqdm(all_images):
-    stored.append(transform(loader(img)))
-
-with open(join(args.root, 'images.pkl'), 'wb') as f:
-    pickle.dump(stored, f)
+for i, img in enumerate(tqdm(all_images)):
+    img = transform(loader(img))
+    img = img.numpy() * 0.5 + 0.5
+    img *= 255
+    img = img.astype(np.uint8)
+    dset['images'][i] = img
