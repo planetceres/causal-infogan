@@ -22,7 +22,7 @@ from cpc_util import *
 
 
 def get_dataloaders():
-    transform = get_transform(args.thanard_dset)
+    transform = get_transform(False)
 
     train_dset = NCEVineDataset(root=join(args.root, 'train_data'), n_neg=args.n_neg,
                                 transform=transform)
@@ -113,10 +113,10 @@ def test(encoder, trans, test_loader, epoch, device):
                                 trans, actions, device)
         test_loss += loss * obs.shape[0]
     test_loss /= len(test_loader.sampler if args.horovod else test_loader.dataset)
-    if args.horovod:
-        test_loss = metric_average(test_loss, 'avg_loss')
+  #  if args.horovod:
+  #      test_loss = metric_average(test_loss, 'avg_loss')
     if not args.horovod or hvd.rank() == 0:
-        print('Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss))
+        print('Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss.item()))
 
 
 def test_distance(encoder, trans, train_loader, device):
