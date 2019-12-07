@@ -121,6 +121,44 @@ def test_cpc(encoder, trans, test_loader, epoch):
     print('CPC Epoch {}, Test Loss {:.4f}'.format(epoch, test_loss))
 
 
+def test_distance(encoder, trans, train_loader):
+    encoder.eval()
+    trans.eval()
+
+    with torch.no_grad():
+        batch = next(iter(train_loader))
+        obs, obs_pos, actions, obs_neg = [b.cuda() for b in batch]
+        bs = obs.shape[0]
+
+        z, z_pos = encoder(obs), encoder(obs_pos)
+        obs_neg = obs_neg.view(-1, *obs_neg.shape[2:]) # b * n x 1 x 64 x 64
+        z_neg = encoder(obs_neg)  # b * n x z_dim
+
+        inp = torch.cat((z, actions), dim=1)
+        z_next = trans(inp)  # b x z_dim
+
+        pos_log_density = (z_next * z_pos).sum(dim=1)
+        if args.mode == 'cos':
+            pos_log_density /= torch.norm(z_next, dim=1) * torch.norm(z_pos, dim=1)
+
+        z_next = z_next.unsqueeze(1)
+        z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
+        neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
+        if args.mode == 'cos':
+            neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
+
+        print('Pos DP', pos_log_density.min().item(), pos_log_density.max().item())
+        print('Neg DP', neg_log_density.min().item(), neg_log_density.max().item())
+
+        pos_dist = torch.norm(z - z_pos, dim=1)
+        trans_dist = torch.norm(z - z_next, dim=1)
+        other_dist = torch.norm(z_pos - z_next, dim=1)
+
+        print('z-z_pos dist', pos_dist.min().item(), pos_dist.max().item())
+        print('z-z_next dist', trans_dist.min().item(), trans_dist.max().item())
+        print('z_next-z_pos dist', other_dist.min().item(), other_dist.max().item())
+
+
 def train_decoder(decoder, optimizer, train_loader, encoder, epoch):
     decoder.train()
     encoder.eval()
@@ -200,7 +238,8 @@ def main():
     torch.save(decoder, join(folder_name, 'decoder.pt'))
     for epoch in range(args.epochs):
         train_cpc(encoder, trans, optim_cpc, train_loader, epoch)
-    #    test_cpc(encoder, trans, test_loader, epoch)
+        test_distance(encoder, trans, train_loader)
+        # test_cpc(encoder, trans, test_loader, epoch)
 
         if epoch % args.log_interval == 0:
     #        train_decoder(decoder, optim_dec, dec_train_loader, encoder, epoch)
