@@ -9,8 +9,8 @@ import errno
 from tqdm import tqdm
 from os.path import join, dirname, basename
 
-from torchvision.datasets.folder import is_image_file, default_loader, find_classes, \
-    IMG_EXTENSIONS
+from torchvision.datasets.folder import is_image_file, default_loader, \
+    IMG_EXTENSIONS, DatasetFolder
 from torchvision.datasets.utils import download_url
 
 
@@ -170,7 +170,7 @@ class ImagePairs(data.Dataset):
         if download:
             self.download()
 
-        classes, class_to_idx = find_classes(root)
+        classes, class_to_idx = DatasetFolder._find_classes(root)
         imgs, actions = make_dataset(root, class_to_idx)
         if len(imgs) == 0:
             raise (RuntimeError("Found 0 images in subfolders of: " + root + "\n"
