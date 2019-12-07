@@ -3,17 +3,22 @@ import numpy as np
 import glob
 from os.path import join, exists
 import os
+from scipy.ndimage.morphology import grey_dilation
 
 import torch
+from torchvision import transforms
 from torchvision.utils import save_image
 from torchvision.datasets.folder import default_loader
 
 from model import FCN_mse
 
+fcn = None
 
-fcn = FCN_mse(2).cuda()
-fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
-fcn.eval()
+def load_fcn_mse(device=torch.device('cuda')):
+    global fcns
+    fcn = FCN_mse(2).to(device)
+    fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
+    fcn.eval()
 
 def apply_fcn_mse(img, device=torch.device('cuda')):
     o = fcn(img.to(device)).detach()
@@ -21,7 +26,7 @@ def apply_fcn_mse(img, device=torch.device('cuda')):
 
 
 def save_nearest_neighbors(encoder, train_loader, test_loader,
-                           epoch, folder_name, k=100, thanard_dset=False,
+                           epoch, folder_name, device, k=100, thanard_dset=False,
                            metric='l2'):
     assert metric in ['l2', 'dotproduct']
     encoder.eval()
@@ -30,7 +35,7 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
 
     with torch.no_grad():
         batch = torch.cat((train_batch, test_batch), dim=0)
-        batch = apply_fcn_mse(batch) if thanard_dset else batch.cuda()
+        batch = apply_fcn_mse(batch, device) if thanard_dset else batch.to(device)
         z = encoder(batch) # 10 x z_dim
         zz = (z ** 2).sum(-1).unsqueeze(1) # z^Tz, 10 x 1
 
@@ -39,7 +44,7 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
         dists = []
         for loader in [train_loader, test_loader]:
             for x, _ in loader:
-                x = apply_fcn_mse(x) if thanard_dset else x.cuda()
+                x = apply_fcn_mse(x, device) if thanard_dset else x.to(device)
                 zx = encoder(x) # b x z_dim
 
                 if metric == 'l2':
@@ -69,25 +74,25 @@ def save_nearest_neighbors(encoder, train_loader, test_loader,
                 imgs.append(train_loader.dataset[idx][0])
         imgs = torch.stack(imgs, dim=0)
         if thanard_dset:
-            imgs = apply_fcn_mse(imgs).cpu()
+            imgs = apply_fcn_mse(imgs, device).cpu()
         save_image(imgs * 0.5 + 0.5, join(folder_name, 'nn_{}.png'.format(i)), nrow=10)
 
 
 def save_recon(decoder, train_loader, test_loader, encoder, epoch,
-               folder_name, thanard_dset=False):
+               folder_name, device, thanard_dset=False):
     decoder.eval()
     encoder.eval()
 
     train_batch = next(iter(train_loader))[0][:16]
     test_batch = next(iter(test_loader))[0][:16]
     if thanard_dset:
-        train_batch, test_batch = apply_fcn_mse(train_batch), apply_fcn_mse(test_batch)
+        train_batch, test_batch = apply_fcn_mse(train_batch, device), apply_fcn_mse(test_batch, device)
     else:
-        train_batch, test_batch = train_batch.cuda(), test_batch.cuda()
+        train_batch, test_batch = train_batch.to(device), test_batch.to(device)
 
     with torch.no_grad():
         train_z, test_z = encoder(train_batch), encoder(test_batch)
-        train_recon, test_recon = decoder(train_z), decoder(test_z)
+        train_recon, test_recon = decoder.predict(train_z), decoder.predict(test_z)
 
     real_imgs = torch.cat((train_batch, test_batch), dim=0)
     recon_imgs = torch.cat((train_recon, test_recon), dim=0)
@@ -132,7 +137,7 @@ def save_interpolation(n_interp, decoder, start_images, goal_images,
             raise Exception('Invalid type {}'.format(type))
         zs = zs.view(-1, z_dim)  # n * (n_interp+2) x z_dim
 
-        imgs = decoder(zs).cpu()
+        imgs = decoder.predict(zs).cpu()
 
     folder_name = join(folder_name, 'interpolations')
     if not exists(folder_name):
@@ -143,7 +148,7 @@ def save_interpolation(n_interp, decoder, start_images, goal_images,
 
 
 def save_run_dynamics(decoder, encoder, trans,
-                      train_loader, epoch, folder_name, root,
+                      train_loader, epoch, folder_name, root, device,
                       include_actions=False, thanard_dset=False,
                       vine=False):
     decoder.eval()
@@ -178,9 +183,9 @@ def save_run_dynamics(decoder, encoder, trans,
         images = [img[:min_length] for img in images]
         actions, images = torch.stack(actions, dim=0), torch.stack(images, dim=0)
         images = images.view(-1, *images.shape[2:])
-        images = apply_fcn_mse(images) if thanard_dset else images.cuda()
+        images = apply_fcn_mse(images, device) if thanard_dset else images.to(device)
         images = images.view(n_ep, min_length, *images.shape[1:])
-        actions = actions.cuda()
+        actions = actions.to(device)
 
         zs = [encoder(images[:, 0])]
         z_dim = zs[0].shape[1]
@@ -189,7 +194,7 @@ def save_run_dynamics(decoder, encoder, trans,
             zs.append(trans(inp))
         zs = torch.stack(zs, dim=1)
         zs = zs.view(-1, z_dim)
-        recon = decoder(zs)
+        recon = decoder.predict(zs)
         recon = recon.view(n_ep, min_length, *images.shape[2:])
 
         all_imgs = torch.stack((images, recon), dim=1)
@@ -201,3 +206,41 @@ def save_run_dynamics(decoder, encoder, trans,
 
         filename = join(folder_name, 'dyn_epoch{}.png'.format(epoch))
         save_image(all_imgs * 0.5 + 0.5, filename, nrow=min_length)
+
+
+def get_transform(thanard_dset):
+    def filter_background(x):
+        x[:, (x < 0.3).any(dim=0)] = 0.0
+        return x
+
+    def dilate(x):
+        x = x.squeeze(0).numpy()
+        x = grey_dilation(x, size=3)
+        x = x[None, :, :]
+        return torch.from_numpy(x)
+
+
+    if thanard_dset:
+        transform = transforms.Compose([
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+            filter_background,
+            lambda x: x.mean(dim=0)[None, :, :],
+            dilate,
+            transforms.Normalize((0.5,), (0.5,)),
+        ])
+    return transform
+
+
+def metric_average(val, name):
+    import horovod.torch as hvd
+    tensor = val.clone()
+    avg_tensor = hvd.allreduce(tensor, name=name)
+    return avg_tensor.item()
