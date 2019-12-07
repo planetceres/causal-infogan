@@ -98,11 +98,7 @@ def main():
     folder_name = join('out', args.name)
     assert exists(folder_name)
 
-    train_loader, test_loader, start_images, goal_images = get_data()
-    if args.thanard_dset:
-        start_images, goal_images = apply_fcn_mse(start_images), apply_fcn_mse(goal_images)
-    else:
-        start_images, goal_images = start_images.cuda(), goal_images.cuda()
+    train_loader, test_loader = get_data()
 
     encoder = torch.load(join(folder_name, 'encoder.pt'), map_location='cuda')
     encoder.eval()
@@ -117,13 +113,21 @@ def main():
         imgs = apply_fcn_mse(imgs).cpu()
     utils.save_image(imgs * 0.5 + 0.5, join(folder_name, 'dec_train_img.png'))
 
-    save_nearest_neighbors(encoder, train_loader, test_loader,
-                           -1, folder_name, thanard_dset=args.thanard_dset,
-                           metric='dotproduct')
-
+  #  save_nearest_neighbors(encoder, train_loader, test_loader,
+  #                         -1, folder_name, thanard_dset=args.thanard_dset,
+  #                         metric='dotproduct')
+    save_recon(model, train_loader, test_loader, encoder,
+               -1, folder_name, thanard_dset=args.thanard_dset)
+    start_images, goal_images = next(iter(train_loader))[0][:20].cuda().chunk(2, dim=0)
+    save_interpolation(args.n_interp, model, start_images, goal_images, encoder,
+                       -1, folder_name)
+    save_run_dynamics(model, encoder, trans, train_loader,
+                      -1, folder_name, args.root,
+                      include_actions=args.include_actions,
+                      thanard_dset=args.thanard_dset, vine=args.vine)
     for epoch in range(args.epochs):
         train(model, optimizer, train_loader, encoder, epoch)
-        test(model, test_loader, encoder, epoch)
+  #      test(model, test_loader, encoder, epoch)
 
         if epoch % args.log_interval == 0:
             save_recon(model, train_loader, test_loader, encoder,
@@ -134,7 +138,7 @@ def main():
             save_run_dynamics(model, encoder, trans, train_loader,
                               epoch, folder_name, args.root,
                               include_actions=args.include_actions,
-                              thanard_dset=args.thanard_dset)
+                              thanard_dset=args.thanard_dset, vine=args.vine)
             torch.save(model, join(folder_name, 'decoder.pt'))
 
 
@@ -144,6 +148,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--thanard_dset', action='store_true')
     parser.add_argument('--include_actions', action='store_true')
+    parser.add_argument('--vine', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
