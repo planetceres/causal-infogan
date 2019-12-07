@@ -61,9 +61,7 @@ def train(model, optimizer, train_loader, encoder, epoch):
     for x, _ in train_loader:
         x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
         z = encoder(x).detach()
-        recon = model(z)
-        loss = F.mse_loss(recon, x)
-
+        loss = model.loss(x, z)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -83,8 +81,7 @@ def test(model, test_loader, encoder, epoch):
     for x, _ in test_loader:
         x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
         z = encoder(x).detach()
-        recon = model(z)
-        loss = F.mse_loss(recon, x)
+        loss = model.loss(x, z)
         test_loss += loss.item() * x.shape[0]
     test_loss /= len(test_loader.dataset)
     print('Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss))
@@ -105,7 +102,7 @@ def main():
     trans = torch.load(join(folder_name, 'trans.pt'), map_location='cuda')
     trans.eval()
 
-    model = Decoder(encoder.z_dim, 1).cuda()
+    model = Decoder(encoder.z_dim, 1, discrete=args.discrete, n_bit=args.n_bit).cuda()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     imgs = next(iter(train_loader))[0]
@@ -149,6 +146,9 @@ if __name__ == '__main__':
     parser.add_argument('--thanard_dset', action='store_true')
     parser.add_argument('--include_actions', action='store_true')
     parser.add_argument('--vine', action='store_true')
+
+    parser.add_argument('--discrete', action='store_true')
+    parser.add_argument('--n_bit', type=int, default=4)
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)

@@ -87,7 +87,7 @@ def save_recon(decoder, train_loader, test_loader, encoder, epoch,
 
     with torch.no_grad():
         train_z, test_z = encoder(train_batch), encoder(test_batch)
-        train_recon, test_recon = decoder(train_z), decoder(test_z)
+        train_recon, test_recon = decoder.predict(train_z), decoder.predict(test_z)
 
     real_imgs = torch.cat((train_batch, test_batch), dim=0)
     recon_imgs = torch.cat((train_recon, test_recon), dim=0)
@@ -132,7 +132,7 @@ def save_interpolation(n_interp, decoder, start_images, goal_images,
             raise Exception('Invalid type {}'.format(type))
         zs = zs.view(-1, z_dim)  # n * (n_interp+2) x z_dim
 
-        imgs = decoder(zs).cpu()
+        imgs = decoder.oredict(zs).cpu()
 
     folder_name = join(folder_name, 'interpolations')
     if not exists(folder_name):
@@ -189,7 +189,7 @@ def save_run_dynamics(decoder, encoder, trans,
             zs.append(trans(inp))
         zs = torch.stack(zs, dim=1)
         zs = zs.view(-1, z_dim)
-        recon = decoder(zs)
+        recon = decoder.predict(zs)
         recon = recon.view(n_ep, min_length, *images.shape[2:])
 
         all_imgs = torch.stack((images, recon), dim=1)
