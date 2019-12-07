@@ -173,7 +173,6 @@ def main():
     action_dim = 4
 
     device = torch.device('cuda:{}'.format(hvd.rank())) if args.horovod else torch.device('cuda')
-    train_loader, test_loader = get_dataloaders()
     load_fcn_mse(device)
 
     encoder = Encoder(args.z_dim, obs_dim[0]).to(device)
@@ -184,18 +183,17 @@ def main():
     if args.horovod:
         enc_np = encoder.named_parameters()
         trans_np = trans.named_parameters()
-        assert all([k not in enc_np for k in trans_np.key()]) # check not intersection
+        print([t[0] for t in enc_np] + [t[0] for t in trans_np])
 
-        named_params = enc_np
-        named_params.update(trans_np)
         optimizer = hvd.DistributedOptimizer(
-            optimizer, named_parameters=named_params
+            optimizer, named_parameters=list(enc_np) + list(trans_np)
         )
 
         hvd.broadcast_parameters(encoder.state_dict(), root_rank=0)
         hvd.broadcast_parameters(trans.state_dict(), root_rank=0)
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
+    train_loader, test_loader = get_dataloaders()
     if not args.horovod or hvd.rank() == 0:
         # Save training images
         batch = next(iter(train_loader))
