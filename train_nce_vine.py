@@ -181,12 +181,11 @@ def main():
     optimizer = optim.Adam(list(encoder.parameters()) + list(trans.parameters()),
                            lr=args.lr)
     if args.horovod:
-        enc_np = encoder.named_parameters()
-        trans_np = trans.named_parameters()
-        print([t[0] for t in enc_np] + [t[0] for t in trans_np])
-
+        enc_np = encoder.named_parameters(prefix=encoder.prefix)
+        trans_np = trans.named_parameters(prefix=trans.prefix)
+        named_parameters = list(enc_np) + list(trans_np)
         optimizer = hvd.DistributedOptimizer(
-            optimizer, named_parameters=list(enc_np) + list(trans_np)
+            optimizer, named_parameters=named_parameters
         )
 
         hvd.broadcast_parameters(encoder.state_dict(), root_rank=0)

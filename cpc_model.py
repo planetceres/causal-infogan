@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Encoder(nn.Module):
+    prefix = 'encoder'
+
     def __init__(self, z_dim, channel_dim):
         super().__init__()
 
@@ -33,6 +35,8 @@ class Encoder(nn.Module):
 
 
 class Transition(nn.Module):
+    prefix = 'transition'
+
     def __init__(self, z_dim, action_dim=0):
         super().__init__()
         self.z_dim = z_dim
@@ -50,6 +54,7 @@ def quantize(x, n_bit):
 
 
 class Decoder(nn.Module):
+    prefix = 'decoder'
 
     def __init__(self, z_dim, channel_dim, discrete=False, n_bit=4):
         super().__init__()
@@ -104,3 +109,4 @@ class Decoder(nn.Module):
             recon = torch.max(recon, dim=1)[1].float()
             recon = (recon / (self.discrete_dim - 1) - 0.5) / 0.5
         return recon
+
