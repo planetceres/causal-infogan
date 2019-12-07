@@ -15,8 +15,8 @@ fcn = FCN_mse(2).cuda()
 fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
 fcn.eval()
 
-def apply_fcn_mse(img):
-    o = fcn(img.cuda()).detach()
+def apply_fcn_mse(img, device=torch.device('cuda')):
+    o = fcn(img.to(device)).detach()
     return torch.clamp(2 * (o - 0.5), -1 + 1e-3, 1 - 1e-3)
 
 

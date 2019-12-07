@@ -120,14 +120,7 @@ def main():
     save_nearest_neighbors(encoder, train_loader, test_loader,
                            -1, folder_name, thanard_dset=args.thanard_dset,
                            metric='dotproduct')
-    save_recon(model, train_loader, test_loader, encoder,
-               -1, folder_name, thanard_dset=args.thanard_dset)
-    save_interpolation(args.n_interp, model, start_images, goal_images, encoder,
-                       -1, folder_name)
-    save_run_dynamics(model, encoder, trans, start_images, train_loader,
-                      -1, folder_name, args.root,
-                      include_actions=args.include_actions,
-                      thanard_dset=args.thanard_dset)
+
     for epoch in range(args.epochs):
         train(model, optimizer, train_loader, encoder, epoch)
         test(model, test_loader, encoder, epoch)
@@ -135,9 +128,10 @@ def main():
         if epoch % args.log_interval == 0:
             save_recon(model, train_loader, test_loader, encoder,
                        epoch, folder_name, thanard_dset=args.thanard_dset)
+            start_images, goal_images = next(iter(train_loader))[0][:20].cuda().chunk(2, dim=0)
             save_interpolation(args.n_interp, model, start_images, goal_images, encoder,
                                epoch, folder_name)
-            save_run_dynamics(model, encoder, trans, start_images, train_loader,
+            save_run_dynamics(model, encoder, trans, train_loader,
                               epoch, folder_name, args.root,
                               include_actions=args.include_actions,
                               thanard_dset=args.thanard_dset)
