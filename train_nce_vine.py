@@ -24,7 +24,7 @@ from cpc_util import *
 def get_dataloaders():
     transform = get_transform(args.thanard_dset)
 
-    train_dset = NCEVineDataset(root=join(args.root, 'train_data'), n_neg=args.n,
+    train_dset = NCEVineDataset(root=join(args.root, 'train_data'), n_neg=args.n_neg,
                                 transform=transform)
     if args.horovod:
         train_sampler = data.distributed.DistributedSampler(train_dset, num_replicas=hvd.size(),
@@ -35,7 +35,7 @@ def get_dataloaders():
                                    shuffle=not args.horovod, num_workers=4,
                                    pin_memory=True, sampler=train_sampler)
 
-    test_dset = NCEVineDataset(root=join(args.root, 'test_data'), n_neg=args.n,
+    test_dset = NCEVineDataset(root=join(args.root, 'test_data'), n_neg=args.n_neg,
                                transform=transform)
     if args.horovod:
         test_sampler = data.distributed.DistributedSampler(test_dset, num_replicas=hvd.size(),
@@ -67,7 +67,7 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions, device):
     pos_log_density = pos_log_density.unsqueeze(1)
 
     z_next = z_next.unsqueeze(1)
-    z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
+    z_neg = z_neg.view(bs, args.n_neg, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
     neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
     if args.mode == 'cos':
         neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
@@ -140,7 +140,7 @@ def test_distance(encoder, trans, train_loader, device):
             pos_log_density /= torch.norm(z_next, dim=1) * torch.norm(z_pos, dim=1)
 
         z_next = z_next.unsqueeze(1)
-        z_neg = z_neg.view(bs, args.n, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
+        z_neg = z_neg.view(bs, args.n_neg, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
         neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
         if args.mode == 'cos':
             neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
@@ -230,7 +230,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--log_interval', type=int, default=1)
 
-    parser.add_argument('--n', type=int, default=50)
+    parser.add_argument('--n_neg', type=int, default=50)
     parser.add_argument('--z_dim', type=int, default=8)
     parser.add_argument('--k', type=int, default=1)
 
