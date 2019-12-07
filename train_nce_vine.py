@@ -22,45 +22,35 @@ from cpc_util import *
 
 
 def get_dataloaders():
-    def filter_background(x):
-        x[:, (x < 0.3).any(dim=0)] = 0.0
-        return x
-
-    def dilate(x):
-        x = x.squeeze(0).numpy()
-        x = grey_dilation(x, size=3)
-        x = x[None, :, :]
-        return torch.from_numpy(x)
-
-    transform = transforms.Compose([
-        transforms.Resize(64),
-        transforms.CenterCrop(64),
-        transforms.ToTensor(),
-        filter_background,
-        lambda x: x.mean(dim=0)[None, :, :],
-        dilate,
-        transforms.Normalize((0.5,), (0.5,)),
-    ])
+    transform = get_transform(args.thanard_dset)
 
     train_dset = NCEVineDataset(root=join(args.root, 'train_data'), n_neg=args.n,
                                 transform=transform)
-    train_loader = data.DataLoader(train_dset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+    if args.horovod:
+        train_sampler = data.distributed.DistributedSampler(train_dset, num_replicas=hvd.size(),
+                                                            rank=hvd.rank())
+    else:
+        train_sampler = None
+    train_loader = data.DataLoader(train_dset, batch_size=args.batch_size,
+                                   shuffle=not args.horovod, num_workers=4,
+                                   pin_memory=True, sampler=train_sampler)
 
-    test_dset = NCEVineDataset(root=join(args.root, 'test_data'), n_neg=args.n, transform=transform)
-    test_loader = data.DataLoader(test_dset, batch_size=args.batch_size, shuffle=True, num_workers=2, drop_last=True)
-
-    dec_train_dset = ImageFolder(join(args.root, 'train_data'), transform=transform)
-    dec_train_loader = data.DataLoader(dec_train_dset, batch_size=args.batch_size, shuffle=True,
-                                       pin_memory=True, num_workers=2) # for training decoder
-
-    dec_test_dset = ImageFolder(join(args.root, 'test_data'), transform=transform)
-    dec_test_loader = data.DataLoader(dec_test_dset, batch_size=args.batch_size, shuffle=True,
-                                      pin_memory=True, num_workers=2)
-
-    return train_loader, test_loader, dec_train_loader, dec_test_loader
+    test_dset = NCEVineDataset(root=join(args.root, 'test_data'), n_neg=args.n,
+                               transform=transform)
+    if args.horovod:
+        test_sampler = data.distributed.DistributedSampler(test_dset, num_replicas=hvd.size(),
+                                                           rank=hvd.rank())
+    else:
+        test_sampler = None
+    test_loader = data.DataLoader(test_dset, batch_size=args.batch_size,
+                                  shuffle=not args.horovod, num_workers=4,
+                                  pin_memory=True, sampler=test_sampler)
 
 
-def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions):
+    return train_loader, test_loader
+
+
+def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions, device):
     bs = obs.shape[0]
 
     z, z_pos = encoder(obs), encoder(obs_pos)  # b x z_dim
@@ -82,52 +72,60 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions):
     if args.mode == 'cos':
         neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
 
-    loss = torch.cat((torch.zeros(bs, 1).cuda(), neg_log_density - pos_log_density), dim=1)  # b x n+1
+    loss = torch.cat((torch.zeros(bs, 1).to(device), neg_log_density - pos_log_density), dim=1)  # b x n+1
     loss = torch.logsumexp(loss, dim=1).mean()
     return loss
 
 
-def train_cpc(encoder, trans, optimizer, train_loader, epoch):
+def train(encoder, trans, optimizer, train_loader, epoch, device):
     encoder.train()
     trans.train()
 
-    train_losses = []
-    pbar = tqdm(total=len(train_loader.dataset))
+    if not args.horovod or hvd.rank() == 0:
+        train_losses = []
+        pbar = tqdm(total=len(train_loader.sampler if args.horovod else train_loader.dataset))
     for batch in train_loader:
-        obs, obs_pos, actions, obs_neg = [b.cuda() for b in batch]
-        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions)
+        obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
+        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder,
+                                trans, actions, device)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        train_losses.append(loss.item())
-        avg_loss = np.mean(train_losses[-50:])
+        if not args.horovod or hvd.rank() == 0:
+            train_losses.append(loss.item())
+            avg_loss = np.mean(train_losses[-50:])
 
-        pbar.set_description('CPC Epoch {}, Train Loss {:.4f}'.format(epoch, avg_loss))
-        pbar.update(obs.shape[0])
-    pbar.close()
+            pbar.set_description('Epoch {}, Train Loss {:.4f}'.format(epoch, avg_loss))
+            pbar.update(obs.shape[0])
+    if not args.horovod or hvd.rank() == 0:
+        pbar.close()
 
 
-def test_cpc(encoder, trans, test_loader, epoch):
+def test(encoder, trans, test_loader, epoch, device):
     encoder.eval()
     trans.eval()
 
     test_loss = 0
     for batch in test_loader:
-        obs, obs_pos, actions, obs_neg = [b.cuda() for b in batch]
-        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions=actions)
-        test_loss += loss.item() * obs.shape[0]
-    test_loss /= len(test_loader.dataset)
-    print('CPC Epoch {}, Test Loss {:.4f}'.format(epoch, test_loss))
+        obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
+        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder,
+                                trans, actions, device)
+        test_loss += loss * obs.shape[0]
+    test_loss /= len(test_loader.sampler if args.horovod else test_loader.dataset)
+    if args.horovod:
+        test_loss = metric_average(test_loss, 'avg_loss')
+    if not args.horovod or hvd.rank() == 0:
+        print('Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss))
 
 
-def test_distance(encoder, trans, train_loader):
+def test_distance(encoder, trans, train_loader, device):
     encoder.eval()
     trans.eval()
 
     with torch.no_grad():
         batch = next(iter(train_loader))
-        obs, obs_pos, actions, obs_neg = [b.cuda() for b in batch]
+        obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
         bs = obs.shape[0]
 
         z, z_pos = encoder(obs), encoder(obs_pos)
@@ -159,47 +157,10 @@ def test_distance(encoder, trans, train_loader):
         print('z_next-z_pos dist', other_dist.min().item(), other_dist.max().item())
 
 
-def train_decoder(decoder, optimizer, train_loader, encoder, epoch):
-    decoder.train()
-    encoder.eval()
-
-    train_losses = []
-    pbar = tqdm(total=len(train_loader.dataset))
-    for x, _ in train_loader:
-        x = x.cuda()
-
-        z = encoder(x).detach()
-        recon = decoder(z)
-        loss = F.mse_loss(recon, x)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        train_losses.append(loss.item())
-        avg_loss = np.mean(train_losses[-50:])
-
-        pbar.set_description('Dec Epoch {}, Train Loss {:.4f}'.format(epoch, avg_loss))
-        pbar.update(x.shape[0])
-    pbar.close()
-
-
-def test_decoder(decoder, test_loader, encoder, epoch):
-    decoder.eval()
-    encoder.eval()
-
-    test_loss = 0
-    for x, _ in test_loader:
-        x = apply_fcn_mse(x) if args.thanard_dset else x.cuda()
-        z = encoder(x).detach()
-        recon = decoder(z)
-        loss = F.mse_loss(recon, x)
-        test_loss += loss.item() * x.shape[0]
-    test_loss /= len(test_loader.dataset)
-    print('Dec Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss))
-
-
 def main():
+    if args.horovod:
+        hvd.init()
+        torch.cuda.set_device(hvd.local_rank())
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
@@ -211,54 +172,51 @@ def main():
     obs_dim = (1, 64, 64)
     action_dim = 4
 
-    encoder = Encoder(args.z_dim, obs_dim[0]).cuda()
-    trans = Transition(args.z_dim, action_dim).cuda()
-    decoder = Decoder(args.z_dim, obs_dim[0]).cuda()
+    device = torch.device('cuda:{}'.format(hvd.rank())) if args.horovod else torch.device('cuda')
+    train_loader, test_loader = get_dataloaders()
+    load_fcn_mse(device)
 
-    optim_cpc = optim.Adam(list(encoder.parameters()) + list(trans.parameters()),
+    encoder = Encoder(args.z_dim, obs_dim[0]).to(device)
+    trans = Transition(args.z_dim, action_dim).to(device)
+
+    optimizer = optim.Adam(list(encoder.parameters()) + list(trans.parameters()),
                            lr=args.lr)
-    optim_dec = optim.Adam(decoder.parameters(), lr=args.lr)
+    if args.horovod:
+        enc_np = encoder.named_parameters()
+        trans_np = trans.named_parameters()
+        assert all([k not in enc_np for k in trans_np.key()]) # check not intersection
 
-    train_loader, test_loader, dec_train_loader, dec_test_loader = get_dataloaders()
+        named_params = enc_np
+        named_params.update(trans_np)
+        optimizer = hvd.DistributedOptimizer(
+            optimizer, named_parameters=named_params
+        )
 
-    # Save training images
-    imgs = next(iter(dec_train_loader))[0][:64]
-    save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_img.png'), nrow=8)
+        hvd.broadcast_parameters(encoder.state_dict(), root_rank=0)
+        hvd.broadcast_parameters(trans.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
-    batch = next(iter(train_loader))
-    obs, obs_next, _, obs_neg = batch
-    imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs.shape[1:])
-    save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_seq_img.png'), nrow=8)
+    if not args.horovod or hvd.rank() == 0:
+        # Save training images
+        batch = next(iter(train_loader))
+        obs, obs_next, _, obs_neg = batch
+        imgs = torch.stack((obs, obs_next), dim=1).view(-1, *obs.shape[1:])
+        save_image(imgs * 0.5 + 0.5, join(folder_name, 'train_seq_img.png'), nrow=8)
 
-    obs_neg = obs_neg.view(-1, *obs_dim)[:100]
-    save_image(obs_neg * 0.5 + 0.5, join(folder_name, 'neg.png'), nrow=10)
+        obs_neg = obs_neg.view(-1, *obs_dim)[:100]
+        save_image(obs_neg * 0.5 + 0.5, join(folder_name, 'neg.png'), nrow=10)
 
-    torch.save(encoder, join(folder_name, 'encoder.pt'))
-    torch.save(trans, join(folder_name, 'trans.pt'))
-    torch.save(decoder, join(folder_name, 'decoder.pt'))
     for epoch in range(args.epochs):
-        train_cpc(encoder, trans, optim_cpc, train_loader, epoch)
-        test_distance(encoder, trans, train_loader)
-        # test_cpc(encoder, trans, test_loader, epoch)
+        if args.horovod:
+            MPI.COMM_WORLD.Barrier()
+        train(encoder, trans, optimizer, train_loader, epoch, device)
+        test(encoder, trans, test_loader, epoch, device)
 
-        if epoch % args.log_interval == 0:
-    #        train_decoder(decoder, optim_dec, dec_train_loader, encoder, epoch)
-    #        test_decoder(decoder, dec_test_loader, encoder, epoch)
-
-    #        save_recon(decoder, dec_train_loader, dec_test_loader, encoder,
-    #                   epoch, folder_name)
-    #        start_images, goal_images = next(iter(dec_train_loader))[0][:20].cuda().chunk(2, dim=0)
-    #        save_interpolation(args.n_interp, decoder, start_images,
-    #                           goal_images, encoder, epoch, folder_name)
-     #       save_run_dynamics(decoder, encoder, trans,
-     #                         dec_train_loader, epoch, folder_name, args.root,
-      #                        include_actions=True, vine=True)
-      #      save_nearest_neighbors(encoder, dec_train_loader, dec_test_loader,
-      #                             epoch, folder_name, metric='dotproduct')
+        if epoch % args.log_interval == 0 and (not args.horovod or hvd.rank() == 0):
+            test_distance(encoder, trans, train_loader, device)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
-       #     torch.save(decoder, join(folder_name, 'decoder.pt'))
 
 
 if __name__ == '__main__':
@@ -276,10 +234,14 @@ if __name__ == '__main__':
     parser.add_argument('--z_dim', type=int, default=8)
     parser.add_argument('--k', type=int, default=1)
 
+    parser.add_argument('--horovod', action='store_true')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='cpc')
     args = parser.parse_args()
 
     assert args.mode in ['dotproduct', 'cos']
+    if args.horovod:
+        import horovod.torch as hvd
+        from mpi4py import MPI
 
     main()
