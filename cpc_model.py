@@ -110,3 +110,26 @@ class Decoder(nn.Module):
             recon = (recon / (self.discrete_dim - 1) - 0.5) / 0.5
         return recon
 
+
+class InverseModel(nn.Module):
+    prefix = 'inv'
+
+    def __init__(self, z_dim, action_dim):
+        super().__init__()
+
+        self.z_dim = z_dim
+        self.action_dim = action_dim
+
+        self.model = nn.Sequential(
+            nn.Linear(2 * z_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, action_dim),
+            nn.Tanh(),
+        )
+
+    def forward(self, z, z_next):
+        x = torch.cat((z, z_next), dim=1)
+        return self.model(x)
+

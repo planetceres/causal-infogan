@@ -1,13 +1,7 @@
 import argparse
-import os
-from os.path import join, exists
-import numpy as np
-from scipy.ndimage.morphology import grey_dilation
-from tqdm import tqdm
-import glob
 
-import torch
 import torch.nn.functional as F
+
 import torch.utils.data as data
 import torch.optim as optim
 
@@ -17,7 +11,7 @@ from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
 
 from dataset import NCEVineDataset
-from cpc_model import Encoder, Decoder, Transition
+from cpc_model import Encoder, Transition, InverseModel
 from cpc_util import *
 
 
@@ -50,7 +44,7 @@ def get_dataloaders():
     return train_loader, test_loader
 
 
-def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions, device):
+def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, inv, actions, device):
     bs = obs.shape[0]
 
     z, z_pos = encoder(obs), encoder(obs_pos)  # b x z_dim
@@ -75,12 +69,15 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, actions, device):
     loss = torch.cat((torch.zeros(bs, 1).to(device), neg_log_density - pos_log_density), dim=1)  # b x n+1
     loss = torch.logsumexp(loss, dim=1).mean()
 
-    loss += F.mse_loss(z_next, z_pos.detach())
+    # loss += F.mse_loss(z_next, z_pos.detach())
+    pred_a = inv(z, z_pos)
+    print(actions.min(dim=1), actions.max(dim=1))
+    loss += F.mse_loss(pred_a, actions)
 
     return loss
 
 
-def train(encoder, trans, optimizer, train_loader, epoch, device):
+def train(encoder, trans, inv, optimizer, train_loader, epoch, device):
     encoder.train()
     trans.train()
 
@@ -90,7 +87,7 @@ def train(encoder, trans, optimizer, train_loader, epoch, device):
     for batch in train_loader:
         obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
         loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder,
-                                trans, actions, device)
+                                trans, inv, actions, device)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -105,7 +102,7 @@ def train(encoder, trans, optimizer, train_loader, epoch, device):
         pbar.close()
 
 
-def test(encoder, trans, test_loader, epoch, device):
+def test(encoder, trans, inv, test_loader, epoch, device):
     encoder.eval()
     trans.eval()
 
@@ -114,7 +111,7 @@ def test(encoder, trans, test_loader, epoch, device):
         with torch.no_grad():
             obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
             loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder,
-                                    trans, actions, device)
+                                    trans, inv, actions, device)
             test_loss += loss * obs.shape[0]
     test_loss /= len(test_loader.sampler if args.horovod else test_loader.dataset)
   #  if args.horovod:
@@ -182,19 +179,28 @@ def main():
 
     encoder = Encoder(args.z_dim, obs_dim[0]).to(device)
     trans = Transition(args.z_dim, action_dim).to(device)
+    parameters = list(encoder.parameters()) + list(trans.parameters())
+    if args.inv_model:
+        inv = InverseModel(args.z_dim, action_dim).to(device)
+        parameters += list(inv.parameters())
+    else:
+        inv = None
 
-    optimizer = optim.Adam(list(encoder.parameters()) + list(trans.parameters()),
-                           lr=args.lr)
+    optimizer = optim.Adam(parameters, lr=args.lr)
     if args.horovod:
         enc_np = encoder.named_parameters(prefix=encoder.prefix)
         trans_np = trans.named_parameters(prefix=trans.prefix)
         named_parameters = list(enc_np) + list(trans_np)
+        if args.inv_model:
+            named_parameters += list(inv.named_parameters(prefix=inv.prefix))
         optimizer = hvd.DistributedOptimizer(
             optimizer, named_parameters=named_parameters
         )
 
         hvd.broadcast_parameters(encoder.state_dict(), root_rank=0)
         hvd.broadcast_parameters(trans.state_dict(), root_rank=0)
+        if args.inv_model:
+            hvd.broadcast_parameters(inv.state_dict(0, root_rank=0))
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
     train_loader, test_loader = get_dataloaders()
@@ -213,14 +219,16 @@ def main():
     for epoch in range(args.epochs):
         if args.horovod:
             MPI.COMM_WORLD.Barrier()
-        train(encoder, trans, optimizer, train_loader, epoch, device)
-        test(encoder, trans, test_loader, epoch, device)
+        train(encoder, trans, inv, optimizer, train_loader, epoch, device)
+        test(encoder, trans, inv, test_loader, epoch, device)
 
         if epoch % args.log_interval == 0 and (not args.horovod or hvd.rank() == 0):
             test_distance(encoder, trans, train_loader, device)
 
             torch.save(encoder, join(folder_name, 'encoder.pt'))
             torch.save(trans, join(folder_name, 'trans.pt'))
+            if args.inv_model:
+                torch.save(inv, join(folder_name, 'inv.pt'))
 
 
 if __name__ == '__main__':
@@ -228,6 +236,7 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=str, default='data/rope2')
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--mode', type=str, default='dotproduct')
+    parser.add_argument('--inv_model', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
