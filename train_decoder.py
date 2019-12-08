@@ -154,7 +154,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--log_interval', type=int, default=1)
 
-    parser.add_argument('--horovod')
+    parser.add_argument('--horovod', action='store_true')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='recon')
     args = parser.parse_args()
