@@ -99,7 +99,7 @@ class Decoder(nn.Module):
         if self.discrete:
             loss = F.cross_entropy(recon, quantize(x, self.n_bit).long())
         else:
-            loss = F.mse_loss(x)
+            loss = F.mse_loss(recon, x)
         return loss
 
 
