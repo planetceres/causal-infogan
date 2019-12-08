@@ -137,17 +137,18 @@ def test_distance(encoder, trans, train_loader, device):
         z_next = trans(inp)  # b x z_dim
 
         pos_log_density = (z_next * z_pos).sum(dim=1)
-        if args.mode == 'cos':
-            pos_log_density /= torch.norm(z_next, dim=1) * torch.norm(z_pos, dim=1)
+        pos_log_density_norm = pos_log_density / (torch.norm(z_next, dim=1) * torch.norm(z_pos, dim=1))
 
         z_next = z_next.unsqueeze(1)
         z_neg = z_neg.view(bs, args.n_neg, args.z_dim).permute(0, 2, 1).contiguous() # b x z_dim x n
         neg_log_density = torch.bmm(z_next, z_neg).squeeze(1)  # b x n
-        if args.mode == 'cos':
-            neg_log_density /= torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1)
+        neg_log_density_norm = neg_log_density / (torch.norm(z_next, dim=2) * torch.norm(z_neg, dim=1))
 
         print('Pos DP', pos_log_density.min().item(), pos_log_density.max().item())
         print('Neg DP', neg_log_density.min().item(), neg_log_density.max().item())
+
+        print('Pos DP cos', pos_log_density_norm.min().item(), pos_log_density_norm.max().item())
+        print('Neg DP cos', neg_log_density_norm.min().item(), neg_log_density_norm.max().item())
 
         pos_dist = torch.norm(z - z_pos, dim=1)
         trans_dist = torch.norm(z - z_next, dim=1)
@@ -204,6 +205,8 @@ def main():
         obs_neg = obs_neg.view(-1, *obs_dim)[:100]
         save_image(obs_neg * 0.5 + 0.5, join(folder_name, 'neg.png'), nrow=10)
 
+    if not args.horovod or hvd.rank() == 0:
+        test_distance(encoder, trans, train_loader, device)
     for epoch in range(args.epochs):
         if args.horovod:
             MPI.COMM_WORLD.Barrier()
