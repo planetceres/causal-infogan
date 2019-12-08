@@ -198,7 +198,7 @@ class ImagePairs(data.Dataset):
                 self.std = np.array([39.65629748, 26.78163011,  1.78058705,  0.15868182,  0.3312854])
             else:
                 self.mean = np.array([0.5, 0.5, 0., 0.])
-                self.std = np.array([0.5, 0.5, 1., 1.])
+                self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])
 
 
     def _get_image(self, path):
@@ -299,6 +299,9 @@ class NCEVineDataset(data.Dataset):
         self.n_neg = n_neg
         assert n_neg % 3 == 0
 
+        self.mean = np.array([0.5, 0.5, 0., 0.])
+        self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])
+
     def _get_image(self, path, preloaded=True):
         img = self.images[self.img2idx[path]]
         img = img.astype('float32') / 255
@@ -317,6 +320,7 @@ class NCEVineDataset(data.Dataset):
         t = int(fsplit[-2])
         k = int(fsplit[-1].split('.')[0])
         action = actions[t-1, k]
+        action = (action - self.mean) / self.std
 
         run = os.path.dirname(obs_file)
         n_per = self.n_neg // 3

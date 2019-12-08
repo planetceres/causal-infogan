@@ -52,8 +52,8 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, inv, actions, device
     obs_neg = obs_neg.view(-1, *obs_neg.shape[2:]) # b * n x 1 x 64 x 64
     z_neg = encoder(obs_neg)  # b * n x z_dim
 
-    z = torch.cat((z, actions), dim=1)
-    z_next = trans(z)  # b x z_dim
+    inp = torch.cat((z, actions), dim=1)
+    z_next = trans(inp)  # b x z_dim
 
     pos_log_density = (z_next * z_pos).sum(dim=1)
     if args.mode == 'cos':
@@ -71,7 +71,6 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, inv, actions, device
 
     # loss += F.mse_loss(z_next, z_pos.detach())
     pred_a = inv(z, z_pos)
-    print(actions.min(dim=1), actions.max(dim=1))
     loss += F.mse_loss(pred_a, actions)
 
     return loss
