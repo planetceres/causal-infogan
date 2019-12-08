@@ -108,10 +108,11 @@ def test(encoder, trans, test_loader, epoch, device):
 
     test_loss = 0
     for batch in test_loader:
-        obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
-        loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder,
-                                trans, actions, device)
-        test_loss += loss * obs.shape[0]
+        with torch.no_grad():
+            obs, obs_pos, actions, obs_neg = [b.to(device) for b in batch]
+            loss = compute_cpc_loss(obs, obs_pos, obs_neg, encoder,
+                                    trans, actions, device)
+            test_loss += loss * obs.shape[0]
     test_loss /= len(test_loader.sampler if args.horovod else test_loader.dataset)
   #  if args.horovod:
   #      test_loss = metric_average(test_loss, 'avg_loss')
