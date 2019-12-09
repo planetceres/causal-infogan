@@ -1,4 +1,4 @@
-import argparse
+import sys
 from os.path import join
 from tqdm import tqdm
 from scipy.ndimage.morphology import grey_dilation
@@ -10,11 +10,9 @@ import torch
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader as loader
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--root', type=str, required=True)
-args = parser.parse_args()
+root = sys.argv[1]
 
-with open(join(args.root, 'pos_neg_pairs.pkl'), 'rb') as f:
+with open(join(root, 'pos_neg_pairs.pkl'), 'rb') as f:
     data = pickle.load(f)
 all_images = data['all_images']
 
@@ -38,7 +36,7 @@ transform = transforms.Compose([
     transforms.Normalize((0.5,), (0.5,)),
 ])
 
-dset = h5py.File(join(args.root, 'images.hdf5'), 'x')
+dset = h5py.File(join(root, 'images.hdf5'), 'x')
 dset.create_dataset('images', (len(all_images), 1, 64, 64), 'uint8')
 stored = []
 for i, img in enumerate(tqdm(all_images)):

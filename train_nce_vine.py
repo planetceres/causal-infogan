@@ -69,9 +69,9 @@ def compute_cpc_loss(obs, obs_pos, obs_neg, encoder, trans, inv, actions, device
     loss = torch.cat((torch.zeros(bs, 1).to(device), neg_log_density - pos_log_density), dim=1)  # b x n+1
     loss = torch.logsumexp(loss, dim=1).mean()
 
-    # loss += F.mse_loss(z_next, z_pos.detach())
-    pred_a = inv(z, z_pos)
-    loss += F.mse_loss(pred_a, actions)
+    #loss += F.mse_loss(trans(inp.detach()), z_pos.detach())
+    #pred_a = inv(z, z_pos)
+    #loss += F.mse_loss(pred_a, actions)
 
     return loss
 
@@ -113,8 +113,8 @@ def test(encoder, trans, inv, test_loader, epoch, device):
                                     trans, inv, actions, device)
             test_loss += loss * obs.shape[0]
     test_loss /= len(test_loader.sampler if args.horovod else test_loader.dataset)
-  #  if args.horovod:
-  #      test_loss = metric_average(test_loss, 'avg_loss')
+    if args.horovod:
+        test_loss = metric_average(test_loss, 'avg_loss')
     if not args.horovod or hvd.rank() == 0:
         print('Epoch {}, Test Loss: {:.4f}'.format(epoch, test_loss.item()))
 

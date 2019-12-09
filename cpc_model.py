@@ -34,6 +34,25 @@ class Encoder(nn.Module):
         return self.out(x)
 
 
+class TransitionMlp(nn.Module):
+    prefix = 'transition_mlp'
+
+    def __init__(self, z_dim, action_dim=0):
+        super().__init__()
+        self.z_dim = z_dim
+        hidden_size = 32
+        self.model = nn.Sequential(
+            nn.Linear(z_dim + action_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, z_dim)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
 class Transition(nn.Module):
     prefix = 'transition'
 
