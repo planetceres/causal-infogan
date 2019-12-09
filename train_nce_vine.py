@@ -176,8 +176,8 @@ def main():
     device = torch.device('cuda:{}'.format(hvd.rank())) if args.horovod else torch.device('cuda')
     load_fcn_mse(device)
 
-    encoder = Encoder(args.z_dim, obs_dim[0]).to(device)
-    trans = Transition(args.z_dim, action_dim).to(device)
+    encoder = Encoder(args.z_dim, obs_dim[0], squash=args.squash).to(device)
+    trans = Transition(args.z_dim, action_dim, squash=args.squash, trans_type=args.trans_type).to(device)
     parameters = list(encoder.parameters()) + list(trans.parameters())
     if args.inv_model:
         inv = InverseModel(args.z_dim, action_dim).to(device)
@@ -236,6 +236,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_interp', type=int, default=8)
     parser.add_argument('--mode', type=str, default='dotproduct')
     parser.add_argument('--inv_model', action='store_true')
+    parser.add_argument('--trans_type', type=str, default='linear')
+    parser.add_argument('--squash', action='store_true')
 
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=2e-4)
