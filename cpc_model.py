@@ -133,3 +133,24 @@ class InverseModel(nn.Module):
         x = torch.cat((z, z_next), dim=1)
         return self.model(x)
 
+
+class ForwardModel(nn.Module):
+    prefix = 'forward'
+
+    def __init__(self, z_dim, action_dim):
+        super().__init__()
+
+        self.z_dim = z_dim
+        self.action_dim = action_dim
+
+        self.model = nn.Sequential(
+            nn.Linear(z_dim + action_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, z_dim),
+        )
+
+    def forward(self, z, action):
+        x = torch.cat((z, action), dim=1)
+        return self.model(x)
