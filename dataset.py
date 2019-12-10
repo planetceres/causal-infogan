@@ -357,7 +357,6 @@ class NCEDataset(data.Dataset):
         self.transform = transform
         self.loader = loader
         self.n_neg = n_neg
-        assert n_neg % 3 == 0
 
         self.mean = np.array([0.5, 0.5, 0., 0.])
         self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])

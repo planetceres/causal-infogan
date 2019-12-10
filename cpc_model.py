@@ -16,15 +16,15 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             # 64 x 32 x 32
             nn.Conv2d(64, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(128),
+        #    nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
             # 128 x 16 x 16
             nn.Conv2d(128, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
+        #    nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # Option 1: 256 x 8 x 8
             nn.Conv2d(256, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
+        #    nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # 256 x 4 x 4
         )
