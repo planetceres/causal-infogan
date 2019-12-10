@@ -198,7 +198,7 @@ class ImagePairs(data.Dataset):
                 self.std = np.array([39.65629748, 26.78163011,  1.78058705,  0.15868182,  0.3312854])
             else:
                 self.mean = np.array([0.5, 0.5, 0., 0.])
-                self.std = np.array([0.5, 0.5, 1., 1.])
+                self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])
 
 
     def _get_image(self, path):
@@ -299,6 +299,9 @@ class NCEVineDataset(data.Dataset):
         self.n_neg = n_neg
         assert n_neg % 3 == 0
 
+        self.mean = np.array([0.5, 0.5, 0., 0.])
+        self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])
+
     def _get_image(self, path, preloaded=True):
         img = self.images[self.img2idx[path]]
         img = img.astype('float32') / 255
@@ -317,6 +320,7 @@ class NCEVineDataset(data.Dataset):
         t = int(fsplit[-2])
         k = int(fsplit[-1].split('.')[0])
         action = actions[t-1, k]
+        action = (action - self.mean) / self.std
 
         run = os.path.dirname(obs_file)
         n_per = self.n_neg // 3
@@ -333,5 +337,53 @@ class NCEVineDataset(data.Dataset):
         all_images = t_images + traj_images + other_images
 
         neg_images = torch.stack([self._get_image(img) for img in all_images], dim=0)
+
+        return obs, obs_next, torch.FloatTensor(action), neg_images
+
+
+class NCEDataset(data.Dataset):
+    def __init__(self, root, n_neg, transform=None, loader=default_loader):
+        self.root = root
+        with open(join(root, 'pos_neg_pairs.pkl'), 'rb') as f:
+            data = pkl.load(f)
+        self.nst = data['neg_samples_t']
+        self.nstraj = data['neg_samples_traj']
+        self.pos_pairs = data['pos_pairs']
+        self.image_paths = data['all_images']
+
+        self.images = h5py.File(join(root, 'images.hdf5'), 'r')['images'][:]
+        self.img2idx = {self.image_paths[i]: i for i in range(len(self.image_paths))}
+
+        self.transform = transform
+        self.loader = loader
+        self.n_neg = n_neg
+
+        self.mean = np.array([0.5, 0.5, 0., 0.])
+        self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])
+
+    def _get_image(self, path, preloaded=True):
+        img = self.images[self.img2idx[path]]
+        img = img.astype('float32') / 255
+        img = (img - 0.5) / 0.5
+        return torch.FloatTensor(img)
+
+    def __len__(self):
+        return len(self.pos_pairs)
+
+    def __getitem__(self, index):
+        obs_file, obs_next_file, action_file = self.pos_pairs[index]
+        obs, obs_next = self._get_image(obs_file), self._get_image(obs_next_file)
+        actions = np.load(action_file)
+
+        fsplit = obs_next_file.split('_')
+        t = int(fsplit[-2])
+        k = int(fsplit[-1].split('.')[0])
+        action = actions[t-1, k]
+        action = (action - self.mean) / self.std
+
+        other_idxs = np.random.randint(0, len(self.image_paths), size=(self.n_neg,))
+        other_images = [self.image_paths[idx] for idx in other_idxs]
+
+        neg_images = torch.stack([self._get_image(img) for img in other_images], dim=0)
 
         return obs, obs_next, torch.FloatTensor(action), neg_images

@@ -1,6 +1,6 @@
 import pickle
 import glob
-import argparse
+import sys
 import os
 from os.path import join
 import numpy as np
@@ -21,11 +21,8 @@ def org_images(images):
     return t_k
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--root', type=str, required=True)
-args = parser.parse_args()
-
-runs = glob.glob(join(args.root, 'run*'))
+root = sys.argv[1]
+runs = glob.glob(join(root, 'run*'))
 runs = sorted(runs)
 
 neg_samples_same_t = dict()
@@ -59,5 +56,5 @@ for run in tqdm(runs):
 
 data = dict(pos_pairs=pos_pairs, neg_samples_t=neg_samples_same_t,
             neg_samples_traj=neg_samples_same_traj, all_images=all_images)
-with open(join(args.root, 'pos_neg_pairs.pkl'), 'wb') as f:
+with open(join(root, 'pos_neg_pairs.pkl'), 'wb') as f:
     pickle.dump(data, f)

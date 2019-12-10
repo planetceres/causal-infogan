@@ -5,24 +5,26 @@ import torch.nn.functional as F
 class Encoder(nn.Module):
     prefix = 'encoder'
 
-    def __init__(self, z_dim, channel_dim):
+    def __init__(self, z_dim, channel_dim, squash=False):
         super().__init__()
+        print('squash', squash)
 
+        self.squash = squash
         self.z_dim = z_dim
         self.model = nn.Sequential(
             nn.Conv2d(channel_dim, 64, 4, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
             # 64 x 32 x 32
             nn.Conv2d(64, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(128),
+        #    nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
             # 128 x 16 x 16
             nn.Conv2d(128, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
+        #    nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # Option 1: 256 x 8 x 8
             nn.Conv2d(256, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
+        #    nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # 256 x 4 x 4
         )
@@ -31,19 +33,41 @@ class Encoder(nn.Module):
     def forward(self, x):
         x = self.model(x)
         x = x.view(x.shape[0], -1)
-        return self.out(x)
+        x = self.out(x)
+        if self.squash:
+            x = torch.tanh(x)
+        return x
 
 
 class Transition(nn.Module):
     prefix = 'transition'
 
-    def __init__(self, z_dim, action_dim=0):
+    def __init__(self, z_dim, action_dim=0, squash=False, trans_type='linear'):
         super().__init__()
+        self.squash = squash
+        self.trans_type = trans_type
+        print('squash', self.squash, 'trans_type', self.trans_type)
         self.z_dim = z_dim
-        self.out = nn.Linear(z_dim + action_dim, z_dim, bias=False)
+
+        if self.trans_type == 'linear':
+            self.model = nn.Linear(z_dim + action_dim, z_dim, bias=False)
+        elif self.trans_type == 'mlp':
+            hidden_size = 32
+            self.model = nn.Sequential(
+                nn.Linear(z_dim + action_dim, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, z_dim)
+            )
+        else:
+            raise Exception('Invalid trans_type', trans_type)
 
     def forward(self, x):
-        return self.out(x)
+        x = self.model(x)
+        if self.squash:
+            x = torch.tanh(x)
+        return x
 
 
 def quantize(x, n_bit):
@@ -99,7 +123,7 @@ class Decoder(nn.Module):
         if self.discrete:
             loss = F.cross_entropy(recon, quantize(x, self.n_bit).long())
         else:
-            loss = F.mse_loss(x)
+            loss = F.mse_loss(recon, x)
         return loss
 
 

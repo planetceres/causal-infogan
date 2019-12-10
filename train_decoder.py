@@ -68,10 +68,11 @@ def test(model, test_loader, encoder, epoch, device):
 
     test_loss = 0
     for x, _ in test_loader:
-        x = apply_fcn_mse(x, device) if args.thanard_dset else x.to(device)
-        z = encoder(x).detach()
-        loss = model.loss(x, z)
-        test_loss += loss * x.shape[0]
+        with torch.no_grad():
+            x = apply_fcn_mse(x, device) if args.thanard_dset else x.to(device)
+            z = encoder(x).detach()
+            loss = model.loss(x, z)
+            test_loss += loss * x.shape[0]
     test_loss /= len(test_loader.sampler if args.horovod else test_loader.dataset)
  #   if args.horovod:
  #       test_loss = metric_average(test_loss, 'avg_loss')
@@ -115,9 +116,9 @@ def main():
             imgs = apply_fcn_mse(imgs, device).cpu()
         utils.save_image(imgs * 0.5 + 0.5, join(folder_name, 'dec_train_img.png'))
 
-        save_nearest_neighbors(encoder, train_loader, test_loader,
-                               -1, folder_name, device, thanard_dset=args.thanard_dset,
-                               metric='dotproduct')
+    #    save_nearest_neighbors(encoder, train_loader, test_loader,
+    #                           -1, folder_name, device, thanard_dset=args.thanard_dset,
+    #                           metric='dotproduct')
 
     for epoch in range(args.epochs):
         if args.horovod:

@@ -10,16 +10,13 @@ from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
 
-from dataset import NCEVineDataset
+from dataset import NCEDataset
 from cpc_model import Encoder, Transition, InverseModel
 from cpc_util import *
 
 
 def get_dataloaders():
-    transform = get_transform(False)
-
-    train_dset = NCEVineDataset(root=join(args.root, 'train_data'), n_neg=args.n_neg,
-                                transform=transform)
+    train_dset = NCEDataset(root=join(args.root, 'train_data'), n_neg=args.n_neg)
     if args.horovod:
         train_sampler = data.distributed.DistributedSampler(train_dset, num_replicas=hvd.size(),
                                                             rank=hvd.rank())
@@ -29,8 +26,7 @@ def get_dataloaders():
                                    shuffle=not args.horovod, num_workers=4,
                                    pin_memory=True, sampler=train_sampler)
 
-    test_dset = NCEVineDataset(root=join(args.root, 'test_data'), n_neg=args.n_neg,
-                               transform=transform)
+    test_dset = NCEDataset(root=join(args.root, 'test_data'), n_neg=args.n_neg)
     if args.horovod:
         test_sampler = data.distributed.DistributedSampler(test_dset, num_replicas=hvd.size(),
                                                            rank=hvd.rank())
@@ -95,7 +91,7 @@ def train(encoder, trans, inv, optimizer, train_loader, epoch, device):
             train_losses.append(loss.item())
             avg_loss = np.mean(train_losses[-50:])
 
-            pbar.set_description('Epoch {}, Train Loss {:.4f}'.format(epoch, avg_loss))
+            pbar.set_description('Epoch {}, Train Loss {:.4f}'.format(epoch, loss.item()))
             pbar.update(obs.shape[0])
     if not args.horovod or hvd.rank() == 0:
         pbar.close()
