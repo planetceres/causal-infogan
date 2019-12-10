@@ -422,7 +422,7 @@ class ImageDataset(data.Dataset):
             folder = os.path.dirname(img_path)
             states = np.load(join(folder, 'env_states.npy'))
             t = int(img_path.split('_')[-2])
-            return self._get_image(index), torch.FloatTensor(states[t])
+            return self._get_image(index), self.transform(self.loader(self.image_paths[index])), torch.FloatTensor(states[t])
         return self._get_image(index)
 
     def get_item_by_path(self, path):
