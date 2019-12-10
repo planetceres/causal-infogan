@@ -19,13 +19,13 @@ def get_dataloaders():
     train_dset = NCEVineDataset(root=join(args.root, 'train_data'), n_neg=0,
                                 transform=transform)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size,
-                                   shuffle=not args.horovod, num_workers=4,
+                                   shuffle=True, num_workers=4,
                                    pin_memory=True)
 
     test_dset = NCEVineDataset(root=join(args.root, 'test_data'), n_neg=0,
                                transform=transform)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size,
-                                  shuffle=not args.horovod, num_workers=4,
+                                  shuffle=True, num_workers=4,
                                   pin_memory=True)
 
 
@@ -34,10 +34,10 @@ def get_dataloaders():
 
 def compute_losses(fwd_model, inv_model, encoder, obs, obs_next, actions):
     z, z_next = encoder(obs).detach(), encoder(obs_next).detach()
-    a_pred = opt_inv(z, z_next)
+    a_pred = inv_model(z, z_next)
     loss_inv = F.mse_loss(a_pred, actions)
 
-    z_pred = fwd_model(z, a_pred)
+    z_pred = fwd_model(z, actions)
     loss_fwd = F.mse_loss(z_pred, z_next)
 
     return loss_inv, loss_fwd
@@ -85,7 +85,7 @@ def test(fwd_model, inv_model, encoder, test_loader, epoch, device):
     inv_loss /= len(test_loader.dataset)
     fwd_loss /= len(test_loader.dataset)
 
-    print('Epoch {}, Inv Loss {:.4f}, Fwd Loss {:.4f}'.format(epoch, inv_loss, fwd_loss))
+    print('Test Epoch {}, Inv Loss {:.4f}, Fwd Loss {:.4f}'.format(epoch, inv_loss, fwd_loss))
 
 
 def main():
@@ -103,8 +103,8 @@ def main():
     encoder = torch.load(join(folder_name, 'encoder.pt'), map_location=device)
     encoder.eval()
 
-    fwd_model = ForwardModel(encoder.z_dim, action_dim)
-    inv_model = InverseModel(encoder.z_dim, action_dim)
+    fwd_model = ForwardModel(encoder.z_dim, action_dim).to(device)
+    inv_model = InverseModel(encoder.z_dim, action_dim).to(device)
 
     opt_fwd = optim.Adam(fwd_model.parameters(), lr=args.lr)
     opt_inv = optim.Adam(inv_model.parameters(), lr=args.lr)
