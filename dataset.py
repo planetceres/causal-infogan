@@ -387,3 +387,40 @@ class NCEDataset(data.Dataset):
         neg_images = torch.stack([self._get_image(img) for img in other_images], dim=0)
 
         return obs, obs_next, torch.FloatTensor(action), neg_images
+
+
+class ImageDataset(data.Dataset):
+    def __init__(self, root, transform=None, loader=default_loader,
+                 include_state=False):
+        self.root = root
+        with open(join(root, 'pos_neg_pairs.pkl'), 'rb') as f:
+            data = pkl.load(f)
+        self.image_paths = data['all_images']
+        self.include_state = include_state
+
+        self.images = h5py.File(join(root, 'images.hdf5'), 'r')['images'][:]
+        self.img2idx = {self.image_paths[i]: i for i in range(len(self.image_paths))}
+
+        self.transform = transform
+        self.loader = loader
+
+    def _get_image(self, index):
+        img = self.images[index]
+        img = img.astype('float32') / 255
+        img = (img - 0.5) / 0.5
+        return torch.FloatTensor(img)
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, index):
+        if self.include_state:
+            img_path = self.image_paths[index]
+            folder = os.path.dirname(img_path)
+            states = np.load(join(folder, 'env_states.npy'))
+            t = int(img_path.split('_')[-2])
+            return self._get_image(index), torch.FloatTensor(states[t])
+        return self._get_image(index)
+
+    def get_item_by_path(self, path):
+        return self[self.img2idx[path]]

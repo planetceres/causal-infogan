@@ -1,7 +1,7 @@
 import argparse
 from tqdm import tqdm
 import numpy as np
-from os.path import join
+from os.path import join, exists
 
 import torch
 import torch.nn.functional as F
