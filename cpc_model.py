@@ -149,6 +149,8 @@ class InverseModel(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
             nn.Linear(128, action_dim),
             nn.Tanh(),
         )
@@ -169,6 +171,8 @@ class ForwardModel(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(z_dim + action_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
             nn.ReLU(),
             nn.Linear(128, 128),
             nn.ReLU(),

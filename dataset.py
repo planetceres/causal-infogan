@@ -322,21 +322,24 @@ class NCEVineDataset(data.Dataset):
         action = actions[t-1, k]
         action = (action - self.mean) / self.std
 
-        run = os.path.dirname(obs_file)
-        n_per = self.n_neg // 3
-        nst = self.nst[run][t-1]
-        nstraj = self.nstraj[run][t-1]
+        if self.n_neg > 0:
+            run = os.path.dirname(obs_file)
+            n_per = self.n_neg // 3
+            nst = self.nst[run][t-1]
+            nstraj = self.nstraj[run][t-1]
 
-        t_idxs = np.random.randint(0, len(nst), size=(n_per,))
-        traj_idxs = np.random.randint(0, len(nstraj), size=(n_per,))
-        other_idxs = np.random.randint(0, len(self.image_paths), size=(n_per,))
+            t_idxs = np.random.randint(0, len(nst), size=(n_per,))
+            traj_idxs = np.random.randint(0, len(nstraj), size=(n_per,))
+            other_idxs = np.random.randint(0, len(self.image_paths), size=(n_per,))
 
-        t_images = [nst[idx] for idx in t_idxs]
-        traj_images = [nstraj[idx] for idx in traj_idxs]
-        other_images = [self.image_paths[idx] for idx in other_idxs]
-        all_images = t_images + traj_images + other_images
+            t_images = [nst[idx] for idx in t_idxs]
+            traj_images = [nstraj[idx] for idx in traj_idxs]
+            other_images = [self.image_paths[idx] for idx in other_idxs]
+            all_images = t_images + traj_images + other_images
 
-        neg_images = torch.stack([self._get_image(img) for img in all_images], dim=0)
+            neg_images = torch.stack([self._get_image(img) for img in all_images], dim=0)
+        else:
+            neg_images = 0
 
         return obs, obs_next, torch.FloatTensor(action), neg_images
 
