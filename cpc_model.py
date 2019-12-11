@@ -15,15 +15,15 @@ class Encoder(nn.Module):
             nn.Conv2d(channel_dim, 64, 4, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
             # 64 x 32 x 32
-            nn.Conv2d(64, 128, 4, 2, 1, bias=False),
+            nn.Conv2d(64, 128, 4, 2, 1),
         #    nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
             # 128 x 16 x 16
-            nn.Conv2d(128, 256, 4, 2, 1, bias=False),
+            nn.Conv2d(128, 256, 4, 2, 1),
         #    nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # Option 1: 256 x 8 x 8
-            nn.Conv2d(256, 256, 4, 2, 1, bias=False),
+            nn.Conv2d(256, 256, 4, 2, 1),
         #    nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
             # 256 x 4 x 4
@@ -90,19 +90,19 @@ class Decoder(nn.Module):
 
         out_dim = self.discrete_dim * self.channel_dim if discrete else channel_dim
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(self.z_dim, 256, 4, 1, bias=False),
+            nn.ConvTranspose2d(self.z_dim, 256, 4, 1),
             # nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, True),
-            nn.ConvTranspose2d(256, 256, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(256, 256, 4, 2, 1),
             # nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, True),
-            nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(256, 128, 4, 2, 1),
             # nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, True),
-            nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(128, 64, 4, 2, 1),
             # nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, True),
-            nn.ConvTranspose2d(64, out_dim, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(64, out_dim, 4, 2, 1),
         )
 
     def forward(self, z):
@@ -191,7 +191,6 @@ class BetaVAE(nn.Module):
         self.decoder = Decoder(z_dim, channel_dim)
         self.beta = beta
 
-
     def encode(self, x):
         return self.encoder(x).chunk(2, dim=1)[0] # Only get mu
 
@@ -199,11 +198,10 @@ class BetaVAE(nn.Module):
         return self.decoder(z)
 
     def loss(self, x):
-        mu, log_sigma = self.encoder(x).chunk(2, dim=1)
-        z = torch.randn_like(mu) * log_sigma.exp() + mu
+        mu, log_var = self.encoder(x).chunk(2, dim=1)
+        z = torch.randn_like(mu) * (0.5 * log_var).exp() + mu
         recon = self.decoder(z)
 
-        recon_loss = F.mse_loss(recon, x)
-        kl_loss = 0.5 * torch.sum(-2 * log_sigma - 1 + torch.exp(2 * log_sigma) + mu ** 2, dim=1)
-        kl_loss = kl_loss.mean()
-        return recon_loss + self.beta * kl_loss, recon_loss.item(), kl_loss.mean()
+        recon_loss = F.mse_loss(recon, x, reduction='sum')
+        kl_loss = 0.5 * torch.sum(-log_var - 1 + torch.exp(log_var) + mu ** 2)
+        return recon_loss + self.beta * kl_loss, recon_loss.item(), kl_loss.item()

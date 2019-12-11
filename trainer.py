@@ -229,8 +229,8 @@ class Trainer:
             self.T.train()
             for num_iters, batch_data in enumerate(dataloader, 0):
                 # Real data
-                o, _ = batch_data[0]
-                o_next, _ = batch_data[1]
+                o = batch_data[0]
+                o_next = batch_data[1]
                 bs = o.size(0)
 
                 real_o.data.resize_(o.size())

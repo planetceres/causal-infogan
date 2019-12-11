@@ -162,85 +162,21 @@ class ImagePairs(data.Dataset):
 
     url = 'https://drive.google.com/uc?export=download&confirm=ypZ7&id=10xovkLQ09BDvhtpD_nqXWFX-rlNzMVl9'
 
-    def __init__(self, root, include_actions=False, transform=None, target_transform=None,
-                 loader=default_loader, n_frames_apart=1, download=False, include_neg=False,
-                 thanard_dset=False):
+    def __init__(self, root, transform=None, target_transform=None,
+                 loader=default_loader, n_frames_apart=1, download=False):
         self.root = root
-        self.include_actions = include_actions
-        self.thanard_dset = thanard_dset
-        if download:
-            self.download()
-
-        classes, class_to_idx = DatasetFolder._find_classes(root)
-        imgs, actions = make_dataset(root, class_to_idx)
-        if len(imgs) == 0:
-            raise (RuntimeError("Found 0 images in subfolders of: " + root + "\n"
-                                                                             "Supported image extensions are: " + ",".join(
-                IMG_EXTENSIONS)))
-        resets = 1. - actions[:, -1]
-        assert len(imgs) == len(resets)
-
-        self.classes = classes
-        self.class_to_idx = class_to_idx
-        self.transform = transform
-        self.target_transform = target_transform
-        self.loader = loader
-        img_pairs = make_pair(imgs, resets, n_frames_apart, self._get_image, self.root)
-        self.img_pairs = img_pairs
-
-        if include_neg:
-            neg_img_pairs = make_negative_pairs(imgs, resets, root)
-            self.img_pairs += neg_img_pairs
-
-        if self.include_actions:
-            if self.thanard_dset:
-                self.mean = np.array([121.65736939, 109.50327158,   2.77160466,   0.13424053, 0.87449964])
-                self.std = np.array([39.65629748, 26.78163011,  1.78058705,  0.15868182,  0.3312854])
-            else:
-                self.mean = np.array([0.5, 0.5, 0., 0.])
-                self.std = np.array([0.5, 0.5, np.sqrt(2), np.sqrt(2)])
-
+        with open(join(root, 'pos_neg_pairs.pkl'), 'rb') as f:
+            data = pkl.load(f)
+        self.img_pairs = data['pos_pairs']
+        self.image_paths = data['all_images']
+        self.images = h5py.File(join(root, 'images.hdf5'), 'r')['images'][:]
+        self.img2idx = {self.image_paths[i]: i for i in range(len(self.image_paths))}
 
     def _get_image(self, path):
-        img = self.loader(path)
-        if self.transform is not None:
-            img = self.transform(img)
-        return img
-
-    def _check_exists(self):
-        return os.path.exists(self.processed_folder)
-
-    @property
-    def raw_folder(self):
-        return os.path.join(self.root, self.__class__.__name__, 'raw')
-
-    @property
-    def processed_folder(self):
-        return os.path.join(self.root, self.__class__.__name__, 'processed')
-
-    @staticmethod
-    def extract_gzip(gzip_path, remove_finished=False):
-        print('Extracting {}'.format(gzip_path))
-        with open(gzip_path.replace('.gz', ''), 'wb') as out_f, \
-                gzip.GzipFile(gzip_path) as zip_f:
-            out_f.write(zip_f.read())
-        if remove_finished:
-            os.unlink(gzip_path)
-
-    def download(self):
-        if self._check_exists():
-            return
-
-        makedir_exist_ok(self.raw_folder)
-        makedir_exist_ok(self.processed_folder)
-
-        # for url in self.urls:
-        # filename = self.url.rpartition('/')[2]
-        filename = "rope"
-        file_path = os.path.join(self.raw_folder, filename)
-        # import ipdb;ipdb.set_trace()
-        download_url(self.url, root=self.raw_folder, filename=filename, md5=None)
-        self.extract_gzip(gzip_path=file_path, remove_finished=False)
+        img = self.images[self.img2idx[path]]
+        img = img.astype('float32') / 255
+        img = (img - 0.5) / 0.5
+        return torch.FloatTensor(img)
 
     def __getitem__(self, index):
         """
@@ -250,36 +186,12 @@ class ImagePairs(data.Dataset):
         Returns:
             tuple: (image, target) where target is class_index of the target class.
         """
-        output = []
-        for path, target in self.img_pairs[index]:
-            img = self.loader(path)
-            if self.transform is not None:
-                img = self.transform(img)
-            if self.target_transform is not None:
-                target = self.target_transform(target)
-
-            if self.include_actions:
-                dir_name = dirname(path)
-                actions = np.load(join(dir_name, 'actions.npy'))
-                i = int(basename(path).split('.')[0].split('_')[1])
-                a = (actions[i] - self.mean) / self.std
-                output.append((img, target, torch.FloatTensor(a)))
-            else:
-                output.append((img, target))
-        return output
+        img1, img2, _ = self.img_pairs[index]
+        return self._get_image(img1), self._get_image(img2)
 
     def __len__(self):
         return len(self.img_pairs)
 
-    def __repr__(self):
-        fmt_str = 'Dataset ' + self.__class__.__name__ + '\n'
-        fmt_str += '    Number of datapoints: {}\n'.format(self.__len__())
-        fmt_str += '    Root Location: {}\n'.format(self.root)
-        tmp = '    Transforms (if any): '
-        fmt_str += '{0}{1}\n'.format(tmp, self.transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
-        tmp = '    Target Transforms (if any): '
-        fmt_str += '{0}{1}'.format(tmp, self.target_transform.__repr__().replace('\n', '\n' + ' ' * len(tmp)))
-        return fmt_str
 
 class NCEVineDataset(data.Dataset):
     def __init__(self, root, n_neg, transform=None, loader=default_loader):

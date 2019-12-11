@@ -9,18 +9,21 @@ import torch.optim as optim
 import torch.utils.data as data
 
 from torchvision.utils import save_image
+from torchvision import transforms
 from torchvision import datasets
 
 from cpc_model import BetaVAE
+from cpc_util import get_transform, load_fcn_mse, apply_fcn_mse
 
 
 def get_dataloaders():
-    train_dset = datasets.ImageFolder(join(args.root, 'train_data'))
+    transform = get_transform(args.thanard_dset)
+    train_dset = datasets.ImageFolder(join(args.root, 'train_data'), transform=transform)
     train_loader = data.DataLoader(train_dset, batch_size=args.batch_size,
                                    shuffle=True, pin_memory=True,
                                    num_workers=4)
 
-    test_dset = datasets.ImageFolder(join(args.root, 'test_data'))
+    test_dset = datasets.ImageFolder(join(args.root, 'test_data'), transform=transform)
     test_loader = data.DataLoader(test_dset, batch_size=args.batch_size,
                                   shuffle=True, pin_memory=True,
                                   num_workers=4)
@@ -34,7 +37,7 @@ def train(model, optimizer, train_loader, epoch, device):
     recon_losses, kl_losses = [], []
     pbar = tqdm(total=len(train_loader.dataset))
     for x, _ in train_loader:
-        x = x.to(device)
+        x = apply_fcn_mse(x, device) if args.thanard_dset else x.to(device)
         loss, recon_loss, kl_loss = model.loss(x)
         optimizer.zero_grad()
         loss.backward()
@@ -56,7 +59,7 @@ def test(model, test_loader, epoch, device):
     test_recon_loss, test_kl_loss = 0, 0
     for x, _ in test_loader:
         with torch.no_grad():
-            x = x.to(device)
+            x = apply_fcn_mse(x, device) if args.thanard_dset else x.to(device)
             _, recon_loss, kl_loss = model.loss(x)
             test_recon_loss += recon_loss * x.shape[0]
             test_kl_loss += kl_loss * x.shape[0]
@@ -69,7 +72,8 @@ def save_recon(model, train_loader, test_loader, epoch, folder_name, device, n=3
     assert n % 2 == 0
     x_train = next(iter(train_loader))[0][:n // 2]
     x_test = next(iter(test_loader))[0][:n // 2]
-    x = torch.cat((x_train, x_test), dim=0).to(device)
+    x = torch.cat((x_train, x_test), dim=0)
+    x = apply_fcn_mse(x, device) if args.thanard_dset else x.to(device)
 
     with torch.no_grad():
         z = model.encode(x)
@@ -85,14 +89,16 @@ def save_recon(model, train_loader, test_loader, epoch, folder_name, device, n=3
 
 def save_interpolation(model, train_loader, test_loader, epoch, folder_name, device, n=10):
     assert n % 2 == 0
-    x_train = next(iter(train_loader))[:n]
-    x_test = next(iter(test_loader))[:n]
+    x_train = next(iter(train_loader))[0][:n]
+    x_test = next(iter(test_loader))[0][:n]
+    x_train = apply_fcn_mse(x_train, device) if args.thanard_dset else x_train.to(device)
+    x_test = apply_fcn_mse(x_test, device) if args.thanard_dset else x_test.to(device)
 
     x_train_start, x_train_end = x_train.chunk(2, dim=0)
     x_test_start, x_test_end = x_test.chunk(2, dim=0)
 
-    x_start = torch.cat((x_train_start, x_test_start), dim=0).to(device)
-    x_end = torch.cat((x_test_start, x_test_end), dim=0).to(device)
+    x_start = torch.cat((x_train_start, x_test_start), dim=0)
+    x_end = torch.cat((x_test_start, x_test_end), dim=0)
 
     with torch.no_grad():
         z_start = model.encode(x_start)
@@ -104,7 +110,7 @@ def save_interpolation(model, train_loader, test_loader, epoch, folder_name, dev
     zs = zs.view(-1, args.z_dim)
     with torch.no_grad():
         imgs = model.decode(zs)
-    imgs = imgs.cpu() * 0.5 + 9.5
+    imgs = imgs.cpu() * 0.5 + 0.5
 
     folder_name = join(folder_name, 'interpolations')
     if not exists(folder_name):
@@ -118,10 +124,19 @@ def main():
     torch.cuda.manual_seed(args.seed)
 
     folder_name = join('out', args.name)
-    assert exists(folder_name)
+    if not exists(folder_name):
+        os.makedirs(folder_name)
 
     device = torch.device('cuda')
+    if args.thanard_dset:
+        load_fcn_mse(device)
     train_loader, test_loader = get_dataloaders()
+
+    x = next(iter(train_loader))[0]
+    if args.thanard_dset:
+        x = apply_fcn_mse(x, device)
+    x = x * 0.5 + 0.5
+    save_image(x, join(folder_name, 'dset.png'))
 
     model = BetaVAE(args.z_dim, 1, beta=args.beta).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -146,6 +161,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=7e-4)
     parser.add_argument('--epochs', type=int, default=100)
 
+    parser.add_argument('--thanard_dset', action='store_true')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, default='recon')
     args = parser.parse_args()

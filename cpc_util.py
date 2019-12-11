@@ -15,7 +15,7 @@ from model import FCN_mse
 fcn = None
 
 def load_fcn_mse(device=torch.device('cuda')):
-    global fcns
+    global fcn
     fcn = FCN_mse(2).to(device)
     fcn.load_state_dict(torch.load('/home/wilson/causal-infogan/data/FCN_mse'))
     fcn.eval()
