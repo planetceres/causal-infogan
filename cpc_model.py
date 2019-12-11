@@ -190,12 +190,16 @@ class BetaVAE(nn.Module):
         self.encoder = Encoder(2 * z_dim, channel_dim)
         self.decoder = Decoder(z_dim, channel_dim)
         self.beta = beta
+        self.z_dim = z_dim
 
     def encode(self, x):
         return self.encoder(x).chunk(2, dim=1)[0] # Only get mu
 
     def decode(self, z):
         return self.decoder(z)
+
+    def forward(self, x):
+        return self.encode(x)
 
     def loss(self, x):
         mu, log_var = self.encoder(x).chunk(2, dim=1)
