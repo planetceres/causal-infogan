@@ -152,8 +152,6 @@ def sample_nn_state(encoder, env, state, z, n_trials=100):
     cand_zs = encoder(cand_obs)
     dists = torch.norm(cand_zs - z.unsqueeze(0), dim=1)
     idx = torch.argmin(dists).item()
-    print(dists.shape)
-    print('closest', dist[0].item())
 
     return cand_states[idx]
 
@@ -210,7 +208,16 @@ def main():
     folder_name = join('out', args.name)
     assert exists(folder_name)
 
-    encoder = torch.load(join(folder_name, 'encoder.pt'), map_location=device)
+    if args.type == 'nce':
+        encoder = torch.load(join(folder_name, 'encoder.pt'), map_location=device)
+    elif args.type == 'vae':
+        encoder = torch.load(join(folder_name, 'vae.pt'), map_location=device)
+        obs = next(iter(data_loader))[0].to(device)
+        with torch.no_grad():
+            obs_recon = encoder.decode(encoder.encode(obs))
+        save_image(obs_recon * 0.5 + 0.5, join(folder_name, 'test_vae_visdyn.pngs'))
+    else:
+        raise Exception('Invalid type', args.type)
     fwd_model = torch.load(join(folder_name, 'fwd_model.pt'), map_location=device)
     inv_model = torch.load(join(folder_name, 'inv_model.pt'), map_location=device)
     encoder.eval()
@@ -238,9 +245,12 @@ if __name__ == '__main__':
     parser.add_argument('--root', type=str, default='data/rope')
     parser.add_argument('--interp_type', type=str, default='slerp')
     parser.add_argument('--n_actions', type=int, default=10)
+    parser.add_argument('--type', type=str, default='nce')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, required=True)
     args = parser.parse_args()
+
+    assert args.type in ['nce', 'vae']
 
     device = torch.device('cuda')
     main()

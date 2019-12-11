@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.data as data
 import torch.optim as optim
+from torchvision.utils import save_image
 
 from dataset import NCEVineDataset
 from cpc_model import InverseModel, ForwardModel
@@ -100,7 +101,16 @@ def main():
     device = torch.device('cuda')
     train_loader, test_loader = get_dataloaders()
 
-    encoder = torch.load(join(folder_name, 'encoder.pt'), map_location=device)
+    if args.type == 'nce':
+        encoder = torch.load(join(folder_name, 'encoder.pt'), map_location=device)
+    elif args.type == 'vae':
+        encoder = torch.load(join(folder_name, 'vae.pt'), map_location=device)
+        obs = next(iter(train_loader))[0].to(device)
+        with torch.no_grad():
+            obs_recon = encoder.decode(encoder.encode(obs))
+        save_image(obs_recon * 0.5 + 0.5, join(folder_name, 'test_vae.png'))
+    else:
+        raise Exception('Invalid type', args.type)
     encoder.eval()
 
     fwd_model = ForwardModel(encoder.z_dim, action_dim).to(device)
@@ -124,8 +134,11 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=7e-4)
     parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--type', type=str, default='nce')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--name', type=str, required=True)
     args = parser.parse_args()
+
+    assert args.type in ['nce', 'vae']
 
     main()
