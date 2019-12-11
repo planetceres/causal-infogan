@@ -90,17 +90,17 @@ class Decoder(nn.Module):
 
         out_dim = self.discrete_dim * self.channel_dim if discrete else channel_dim
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(self.z_dim, 512, 4, 1, bias=False),
-            nn.BatchNorm2d(512),
+            nn.ConvTranspose2d(self.z_dim, 256, 4, 1, bias=False),
+            # nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, True),
-            nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.ConvTranspose2d(256, 256, 4, 2, 1, bias=False),
+            # nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, True),
             nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(128),
+            # nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, True),
             nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64),
+            # nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, True),
             nn.ConvTranspose2d(64, out_dim, 4, 2, 1, bias=False),
         )
@@ -182,3 +182,28 @@ class ForwardModel(nn.Module):
     def forward(self, z, action):
         x = torch.cat((z, action), dim=1)
         return self.model(x)
+
+
+class BetaVAE(nn.Module):
+    def __init__(self, z_dim, channel_dim, beta=1.0):
+        super().__init__()
+        self.encoder = Encoder(2 * z_dim, channel_dim)
+        self.decoder = Decoder(z_dim, channel_dim)
+        self.beta = beta
+
+
+    def encode(self, x):
+        return self.encoder(x).chunk(2, dim=1)[0] # Only get mu
+
+    def decode(self, z):
+        return self.decoder(z)
+
+    def loss(self, x):
+        mu, log_sigma = self.encoder(x).chunk(2, dim=1)
+        z = torch.randn_like(mu) * log_sigma.exp() + mu
+        recon = self.decoder(z)
+
+        recon_loss = F.mse_loss(recon, x)
+        kl_loss = 0.5 * torch.sum(-2 * log_sigma - 1 + torch.exp(2 * log_sigma) + mu ** 2, dim=1)
+        kl_loss = kl_loss.mean()
+        return recon_loss + self.beta * kl_loss, recon_loss.item(), kl_loss.mean()
