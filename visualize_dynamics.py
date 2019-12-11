@@ -107,7 +107,7 @@ def visualize_inv(encoder, inv_model, data_loader, env, folder_name, mode, n=10)
                     z2 = interpolate(zstart, zend, (t + 1) / args.n_actions)
                     action = run_single(inv_model, z1, z2)
                 elif mode == 'closed':
-                    ztmp = interpolate(zstart, zend, 1.0)
+                    ztmp = interpolate(zstart, zend, 1. / (args.n_actions - t))
                     action = run_single(inv_model, zstart, ztmp)
                 else:
                     raise Exception('Invalid mode', mode)
@@ -202,20 +202,21 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
+    random.seed(args.seed)
 
     dset, data_loader = get_dataloaders()
 
     folder_name = join('out', args.name)
     assert exists(folder_name)
 
+    obs = next(iter(data_loader))[0].to(device)
     if args.type == 'nce':
         encoder = torch.load(join(folder_name, 'encoder.pt'), map_location=device)
     elif args.type == 'vae':
         encoder = torch.load(join(folder_name, 'vae.pt'), map_location=device)
-        obs = next(iter(data_loader))[0].to(device)
         with torch.no_grad():
             obs_recon = encoder.decode(encoder.encode(obs))
-        save_image(obs_recon * 0.5 + 0.5, join(folder_name, 'test_vae_visdyn.pngs'))
+        save_image(obs_recon * 0.5 + 0.5, join(folder_name, 'test_vae_visdyn.png'))
     else:
         raise Exception('Invalid type', args.type)
     fwd_model = torch.load(join(folder_name, 'fwd_model.pt'), map_location=device)
@@ -235,9 +236,9 @@ def main():
     env = DMControlEnv(**env_args)
     env.reset()
 
-    visualize_inv(encoder, inv_model, data_loader, env, folder_name, 'open')
+    #visualize_inv(encoder, inv_model, data_loader, env, folder_name, 'open')
     visualize_inv(encoder, inv_model, data_loader, env, folder_name, 'closed')
-    visualize_fwd(encoder, fwd_model, dset, env, folder_name)
+    #visualize_fwd(encoder, fwd_model, dset, env, folder_name)
 
 
 if __name__ == '__main__':

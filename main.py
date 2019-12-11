@@ -75,7 +75,7 @@ parser.add_argument("-learn_mu", action="store_true")
 parser.add_argument("-learn_var", action="store_true")
 
 # Planning
-parser.add_argument("-planning_epoch", type=int, default=[100], nargs="+",
+parser.add_argument("-planning_epoch", type=int, default=[0], nargs="+",
                     help="List of epoch numbers to run planning.")
 parser.add_argument("-plan_length", type=int, default=10,
                     help="Set to 0 if doesn't run planning.")
